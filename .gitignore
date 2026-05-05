@@ -18,3 +18,4 @@ Manifest.toml
 # Snopt output files
 *.out
 .codex
+.vscode/settings.json
