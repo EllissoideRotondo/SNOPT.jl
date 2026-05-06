@@ -100,7 +100,7 @@ memory.miniw, memory.minrw
 
 ## Platform support
 
-**Linux** and **macOS** should work out of the box with the precompiled SNOPT library.
+**Linux** and **macOS** should work out of the box.
 
 **Windows** requires recompiling the SNOPT source with
 [MinGW](https://www.mingw-w64.org/) to produce a compatible DLL. If
