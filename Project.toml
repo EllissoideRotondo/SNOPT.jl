@@ -1,6 +1,6 @@
-name = "Snopt"
+name = "SNOPT"
 uuid = "09fd284b-e7b0-4fba-b41f-c39527135ddd"
-version = "1.0.0"
+version = "0.1.0"
 authors = ["Alex Pascarella <alex.pascarella@proton.me>"]
 
 [workspace]

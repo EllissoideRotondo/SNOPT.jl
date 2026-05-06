@@ -1,16 +1,12 @@
 # Unconstrained quadratic  min (x - 1)^2 + (y - 2)^2
 # Analytical solution: x* = (1, 2), f* = 0
-
-using Pkg
-Pkg.activate(@__DIR__)
-
 using Snopt
 
-function eval_obj(x)
+function objective(x)
     return (x[1] - 1)^2 + (x[2] - 2)^2
 end
 
-function eval_grad!(g, x)
+function gradient!(g, x)
     g[1] = 2(x[1] - 1)
     g[2] = 2(x[2] - 2)
     return nothing
@@ -22,8 +18,8 @@ function progress(event::SnoptMajorLog)
 end
 
 result = snopt(
-    eval_obj,
-    eval_grad!,
+    objective,
+    gradient!,
     [0.0, 0.0];
     lb = -10.0,
     ub = 10.0,

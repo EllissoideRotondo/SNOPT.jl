@@ -1,4 +1,4 @@
-module Snopt
+module SNOPT
 
 using Libdl
 using SparseArrays: SparseMatrixCSC, nnz
