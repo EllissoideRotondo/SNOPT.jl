@@ -1,6 +1,6 @@
 # Unconstrained quadratic  min (x - 1)^2 + (y - 2)^2
 # Analytical solution: x* = (1, 2), f* = 0
-using Snopt
+using SNOPT
 
 function objective(x)
     return (x[1] - 1)^2 + (x[2] - 2)^2

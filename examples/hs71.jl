@@ -7,7 +7,7 @@
 #
 #   Known solution: x* = (1, 4.7430, 3.8211, 1.3791), f* ≈ 17.0140
 
-using Snopt
+using SNOPT
 using SparseArrays
 
 function objective(x)

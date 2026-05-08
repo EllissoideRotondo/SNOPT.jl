@@ -12,6 +12,9 @@ function free!(prob::SnoptWorkspace)
     return nothing
 end
 
+Base.close(prob::SnoptWorkspace) = free!(prob)
+Base.isopen(prob::SnoptWorkspace) = !prob.finalized
+
 const IW_MINOR_ITNS = 421  # iw(421): cumulative minor iterations - SNOPT 7.7 iw layout
 
 const IW_MAJOR_ITNS = 422  # iw(422): cumulative major iterations - SNOPT 7.7 iw layout
@@ -74,6 +77,8 @@ const SNOPT_STATUS = Dict(
 
 """
     initialize(printfile, summfile)
+    initialize(f, printfile, summfile[, leniw, lenrw])
+
 Allocate a workspace using a conservative default size suitable for small to
 medium problems (up to ~100 variables and constraints). For larger problems,
 use the explicit-size overload and compute workspace lengths with:
@@ -81,6 +86,15 @@ use the explicit-size overload and compute workspace lengths with:
     lenrw = 500 + 200*(n + nc)
 where `n` is the number of design variables and `nc` the number of nonlinear
 constraints. Problems with very dense Jacobians may need a larger `lenrw`.
+
+The function form supports Julia's do-block cleanup pattern:
+
+    initialize("", "") do ws
+        # build and solve a low-level SnoptA/SnoptB/SnoptC problem
+    end
+
+The workspace is closed with `close(ws)` when the block exits, including if the
+block throws.
 
 """
 
@@ -92,7 +106,7 @@ function initialize(printfile::String, summfile::String, leniw::Int, lenrw::Int)
     has_snopt() || error(
         "SNOPT library not loaded. Set SNOPTDIR (or DYLD_LIBRARY_PATH on macOS) " *
         "to the directory containing libsnopt7 and restart Julia, " *
-        "or call Snopt.find_snopt_lib() to diagnose.")
+        "or call SNOPT.find_snopt_lib() to diagnose.")
     prob = SnoptWorkspace(leniw, lenrw)
     printpath = snopt_output_file(printfile)
     summpath = snopt_output_file(summfile)
@@ -102,4 +116,23 @@ function initialize(printfile::String, summfile::String, leniw::Int, lenrw::Int)
           printpath, Cint(ncodeunits(printpath)), summpath, Cint(ncodeunits(summpath)),
           prob.iw, prob.leniw, prob.rw, prob.lenrw)
     return prob
+end
+
+function initialize(f::Function, printfile::String, summfile::String)
+    ws = initialize(printfile, summfile)
+    try
+        return f(ws)
+    finally
+        close(ws)
+    end
+end
+
+function initialize(f::Function, printfile::String, summfile::String,
+                    leniw::Int, lenrw::Int)
+    ws = initialize(printfile, summfile, leniw, lenrw)
+    try
+        return f(ws)
+    finally
+        close(ws)
+    end
 end

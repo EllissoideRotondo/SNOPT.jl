@@ -1,19 +1,19 @@
-# Snopt.jl
+# SNOPT.jl
 
-[Snopt.jl](https://github.com/EllissoideRotondo/Snopt.jl) is a wrapper for
+[SNOPT.jl](https://github.com/EllissoideRotondo/Snopt.jl) is a wrapper for
 the [SNOPT](https://ccom.ucsd.edu/~optimizers/solvers/snopt/) sparse nonlinear
 optimizer.
 
 ## License
 
-`Snopt.jl` is licensed under the [MIT License](LICENSE).
+`SNOPT.jl` is licensed under the [MIT License](LICENSE).
 
 The underlying library is a closed-source commercial product for which
 you must [purchase a license](https://ccom.ucsd.edu/~optimizers/solvers/snopt/).
 
 ## Installation
 
-`Snopt.jl` requires a SNOPT shared library (`libsnopt7.so` on Linux,
+`SNOPT.jl` requires a SNOPT shared library (`libsnopt7.so` on Linux,
 `libsnopt7.dylib` on macOS, `libsnopt7.dll` on Windows). SNOPT binaries are
 not distributed with this package.
 
@@ -22,9 +22,9 @@ shared library, then install the package:
 
 ```julia
 import Pkg
-Pkg.add("Snopt")
-using Snopt
-Snopt.has_snopt()  # true if the library was found
+Pkg.add("SNOPT")
+using SNOPT
+SNOPT.has_snopt()  # true if the library was found
 ```
 
 On Linux and macOS, the platform library-path environment variables can be
@@ -39,11 +39,11 @@ export DYLD_LIBRARY_PATH=/path/to/snopt:$DYLD_LIBRARY_PATH  # macOS
 
 For most SciML workflows, use
 [OptimizationSnopt.jl](https://github.com/EllissoideRotondo/OptimizationSnopt.jl)
-through [Optimization.jl](https://github.com/SciML/Optimization.jl). `Snopt.jl`
+through [Optimization.jl](https://github.com/SciML/Optimization.jl). `SNOPT.jl`
 also provides a small low-level API for direct use with Julia callbacks.
 
 ```julia
-using Snopt
+using SNOPT
 
 result = snopt(
     x -> (x[1] - 1)^2 + (x[2] - 2)^2,

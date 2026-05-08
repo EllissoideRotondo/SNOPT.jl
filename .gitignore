@@ -19,3 +19,5 @@ Manifest.toml
 *.out
 .codex
 .vscode/settings.json
+
+review/

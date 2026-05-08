@@ -50,7 +50,7 @@ function __init__()
     global libsnopt7 = find_snopt_lib()
     if isempty(libsnopt7)
         @warn """
-              Snopt.jl: SNOPT library not found. has_snopt() returns false.
+              SNOPT.jl: SNOPT library not found. has_snopt() returns false.
               Set SNOPTDIR to the directory containing libsnopt7, or add it to the platform library path:
                   export SNOPTDIR=/path/to/snopt/lib
                   export LD_LIBRARY_PATH=/path/to/snopt/lib:\$LD_LIBRARY_PATH

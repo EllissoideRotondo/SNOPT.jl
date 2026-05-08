@@ -69,6 +69,31 @@ end
     ws2 = initialize("", "", 40000, 5000)
     @test ws2.leniw == 40000
     @test ws2.lenrw == 5000
+    @test isopen(ws2)
+    close(ws2)
+    @test !isopen(ws2)
+    close(ws2)
+    @test !isopen(ws2)
+
+    block_ws = Ref{Any}(nothing)
+    block_result = initialize("", "", 1000, 1000) do ws
+        block_ws[] = ws
+        @test isopen(ws)
+        :ok
+    end
+    @test block_result === :ok
+    @test block_ws[] isa SNOPT.SnoptWorkspace
+    @test !isopen(block_ws[])
+
+    thrown_ws = Ref{Any}(nothing)
+    @test_throws ErrorException initialize("", "", 1000, 1000) do ws
+        thrown_ws[] = ws
+        @test isopen(ws)
+        error("workspace block failed")
+    end
+    @test thrown_ws[] isa SNOPT.SnoptWorkspace
+    @test !isopen(thrown_ws[])
+
     @test SnoptProblem === SnoptB
     @test SnoptA <: AbstractSnoptProblem
     @test SnoptB <: AbstractSnoptProblem
