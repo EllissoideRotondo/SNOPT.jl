@@ -8,8 +8,8 @@ function check_memory_estimate(memory::SnoptMemory)
 end
 
 function snmemb(ws::SnoptWorkspace, m::Integer, n::Integer, neJ::Integer,
-                negCon::Integer, nnCon::Integer, nnJac::Integer,
-                nnObj::Integer)
+                negCon::Integer, nnCon::Integer, nnObj::Integer,
+                nnJac::Integer)
     info  = Int32[0]
     miniw = Int32[0]
     minrw = Int32[0]
@@ -28,7 +28,7 @@ function snmemb(ws::SnoptWorkspace, m::Integer, n::Integer, neJ::Integer,
 end
 
 """
-    snmemb(m, n, neJ, negCon, nnCon, nnJac, nnObj; options=nothing,
+    snmemb(m, n, neJ, negCon, nnCon, nnObj, nnJac; options=nothing,
            printfile="", summfile="")
 Initialize a temporary bootstrap workspace, apply any SNOPT options, and return
 the SNOPTB/SNOPTC memory estimate.
@@ -36,13 +36,13 @@ the SNOPTB/SNOPTC memory estimate.
 """
 
 function snmemb(m::Integer, n::Integer, neJ::Integer, negCon::Integer,
-                nnCon::Integer, nnJac::Integer, nnObj::Integer;
+                nnCon::Integer, nnObj::Integer, nnJac::Integer;
                 options=nothing, printfile::String = "", summfile::String = "")
     ws = initialize(printfile, summfile, SNOPT_MEMORY_WORKSPACE,
                     SNOPT_MEMORY_WORKSPACE)
     try
         apply_options!(ws, options)
-        return snmemb(ws, m, n, neJ, negCon, nnCon, nnJac, nnObj)
+        return snmemb(ws, m, n, neJ, negCon, nnCon, nnObj, nnJac)
     finally
         free!(ws)
     end

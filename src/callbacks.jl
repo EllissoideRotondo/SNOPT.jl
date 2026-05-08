@@ -117,7 +117,7 @@ function make_snlog(callback)
             iobj = Int(unsafe_load(iObj_))
             x_values = copy_cdouble_vector(x_, nb)
             linear_objective = (iobj > 0 && n + iobj <= length(x_values)) ?
-                objective_scale * x_values[n + iobj] : 0.0
+                x_values[n + iobj] : 0.0
             event = SnoptMajorLog(
                 Int(unsafe_load(itn_)),
                 Int(unsafe_load(nMajor_)),
@@ -277,6 +277,11 @@ objective/constraint row values. If derivatives are requested, `eval_G(G, x)`
 fills the nonlinear derivative values in the order specified by `iGfun` and
 `jGvar`. Returning `false` from `callback(event)` requests SNOPT termination.
 
+If `eval_G` is `nothing`, any gradient request from SNOPT sets `status = -1`
+and terminates the solve with `User_Supplied_Function_Error`. This is only
+valid when SNOPT is configured for finite-difference gradients via
+`set_option!(ws, "Derivative option", 0)`.
+
 """
 
 function make_usrfun_a(eval_F::Function; eval_G=nothing, callback=nothing)
@@ -367,13 +372,11 @@ function make_usrfun_c(eval_obj::Function, eval_grad::Function,
             if mode == 1 || mode == 2
                 g = unsafe_wrap(Array, gobj_, nnobj)
                 eval_grad(g, x)
+                negcon == nnz(J) || throw(DimensionMismatch(
+                    "SNOPT-C passed negcon=$negcon but J has $(nnz(J)) nonzeros; " *
+                    "Jacobian sparsity pattern is inconsistent"))
                 jnzval = unsafe_wrap(Array, gcon_, negcon)
-                if negcon == nnz(J)
-                    eval_jac(jnzval, x)
-                else
-                    jtmp = unsafe_wrap(Array, gcon_, nnz(J))
-                    eval_jac(jtmp, x)
-                end
+                eval_jac(jnzval, x)
             end
         catch err
             record_callback_exception!(state, err)

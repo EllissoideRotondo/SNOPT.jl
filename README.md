@@ -94,7 +94,7 @@ result = snopt(
 For manual workspace sizing, call `snmemb` directly:
 
 ```julia
-memory = snmemb(m, n, neJ, negCon, nnCon, nnJac, nnObj)
+memory = snmemb(m, n, neJ, negCon, nnCon, nnObj, nnJac)
 memory.miniw, memory.minrw
 ```
 

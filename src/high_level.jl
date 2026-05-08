@@ -140,7 +140,7 @@ function snopt(eval_obj::Function, eval_grad::Function,
     nnJac = nc > 0 ? n : 0
     nnObj = n
     memory = check_memory_estimate(
-        snmemb(m_eff, n, neJ, negCon, nnCon, nnJac, nnObj;
+        snmemb(m_eff, n, neJ, negCon, nnCon, nnObj, nnJac;
                options, printfile, summfile))
     ws = initialize(printfile, summfile, memory.miniw, memory.minrw)
     try
@@ -152,7 +152,7 @@ function snopt(eval_obj::Function, eval_grad::Function,
         bl = [xlow; nc > 0 ? lcon_vector : [-SNOPT_INF]]
         bu = [xupp; nc > 0 ? ucon_vector : [SNOPT_INF]]
         hs = zeros(Int32, n + m_eff)
-        prob = SnoptB(ws, n, nc, m_eff, x, bl, bu, hs, J32,
+        prob = SnoptB(ws, n, nc, m_eff, n, x, bl, bu, hs, J32,
                       0.0, 0, Float64[], objfun, confun)
         snoptb!(prob; start, name, snlog)
         return snopt_result(prob, memory)

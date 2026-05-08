@@ -17,7 +17,7 @@ function snoptb!(prob::SnoptB; start::String = "Cold", name::String = "Julia",
     nnCon = nc
     nnJac = nc > 0 ? prob.n : 0
     inform = snoptb!(prob.ws, start, name,
-                     prob.m_eff, prob.n, nnCon, prob.n, nnJac,
+                     prob.m_eff, prob.n, nnCon, prob.nnobj, nnJac,
                      0.0, 0,
                      prob.confun, prob.objfun,
                      prob.J, prob.bl, prob.bu, prob.hs, prob.x;
@@ -25,14 +25,14 @@ function snoptb!(prob::SnoptB; start::String = "Cold", name::String = "Julia",
     prob.obj_val = prob.ws.obj_val
     prob.status  = inform
     prob.lambda  = prob.ws.lambda
-    copyto!(prob.x, prob.ws.x)
     return inform
 end
 
-function snopt!(prob::SnoptA)
-    return snopta!(prob)
+function snopt!(prob::SnoptA; start::String = "Cold", name::String = "Julia")
+    return snopta!(prob; start, name)
 end
 
-function snopt!(prob::SnoptC)
-    return snoptc!(prob)
+function snopt!(prob::SnoptC; start::String = "Cold", name::String = "Julia",
+                snlog=nothing)
+    return snoptc!(prob; start, name, snlog)
 end

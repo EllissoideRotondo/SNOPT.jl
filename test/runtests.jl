@@ -1,17 +1,17 @@
-using Snopt
+using SNOPT
 using Test
 
-if !Snopt.has_snopt()
-    @info "Snopt.jl: SNOPT library not found, skipping all tests."
+if !SNOPT.has_snopt()
+    @info "SNOPT.jl: SNOPT library not found, skipping all tests."
     exit(0)
 end
 
 if Sys.iswindows()
-    #@info "Snopt.jl: Windows is not yet supported, skipping all tests."
+    #@info "SNOPT.jl: Windows is not yet supported, skipping all tests."
     #exit(0)
 end
 
-@info "Running tests with $(Snopt.libsnopt7)"
+@info "Running tests with $(SNOPT.libsnopt7)"
 
 @testset "Test examples" begin
     include("snopt_tests.jl")

@@ -66,6 +66,7 @@ mutable struct SnoptB{F1<:Function, F2<:Function} <: AbstractSnoptProblem
     n::Int                            # num design variables
     nc::Int                           # num nonlinear constraints
     m_eff::Int                        # effective m passed to Fortran (>= 1; nc when nc>0, else 1)
+    nnobj::Int                        # num nonlinear objective variables (<= n)
     x::Vector{Float64}                # [n+m_eff] extended point (initial / final)
     bl::Vector{Float64}               # [n+m_eff] lower bounds
     bu::Vector{Float64}               # [n+m_eff] upper bounds
@@ -85,6 +86,7 @@ mutable struct SnoptC{F<:Function} <: AbstractSnoptProblem
     n::Int                            # num design variables
     nc::Int                           # num nonlinear constraints
     m_eff::Int                        # effective m passed to Fortran
+    nnobj::Int                        # num nonlinear objective variables (<= n)
     x::Vector{Float64}                # [n+m_eff] extended point (initial / final)
     bl::Vector{Float64}               # [n+m_eff] lower bounds
     bu::Vector{Float64}               # [n+m_eff] upper bounds

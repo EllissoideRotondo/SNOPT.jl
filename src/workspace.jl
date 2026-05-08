@@ -12,14 +12,14 @@ function free!(prob::SnoptWorkspace)
     return nothing
 end
 
-const IW_MINOR_ITNS = 421  # cumulative minor iterations
+const IW_MINOR_ITNS = 421  # iw(421): cumulative minor iterations - SNOPT 7.7 iw layout
 
-const IW_MAJOR_ITNS = 422  # cumulative major iterations
+const IW_MAJOR_ITNS = 422  # iw(422): cumulative major iterations - SNOPT 7.7 iw layout
 
-const RW_RUN_TIME   = 462  # CPU time in seconds
+const RW_RUN_TIME   = 462  # rw(462): CPU run time in seconds    - SNOPT 7.7 rw layout
 
 workspace_value(ws_rw::Vector{Float64}, index::Int) =
-    length(ws_rw) >= index ? ws_rw[index] : 0.0
+    length(ws_rw) >= index ? max(ws_rw[index], 0.0) : 0.0
 # The MinGW Windows wrapper expects genuinely empty filenames here.
 # Replacing them with "NUL" leaves the workspace partially initialized and the
 # first solve can fail with bogus storage errors.
@@ -85,10 +85,14 @@ constraints. Problems with very dense Jacobians may need a larger `lenrw`.
 """
 
 function initialize(printfile::String, summfile::String)
-    initialize(printfile, summfile, 30500, 3000)
+    initialize(printfile, summfile, 30500, 60000)
 end
 
 function initialize(printfile::String, summfile::String, leniw::Int, lenrw::Int)
+    has_snopt() || error(
+        "SNOPT library not loaded. Set SNOPTDIR (or DYLD_LIBRARY_PATH on macOS) " *
+        "to the directory containing libsnopt7 and restart Julia, " *
+        "or call Snopt.find_snopt_lib() to diagnose.")
     prob = SnoptWorkspace(leniw, lenrw)
     printpath = snopt_output_file(printfile)
     summpath = snopt_output_file(summfile)

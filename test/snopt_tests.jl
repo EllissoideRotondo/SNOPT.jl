@@ -24,7 +24,7 @@ function make_unconstrained_prob(ws, x0, bl_x, bu_x, objfun, confun)
     hs   = zeros(Int32, n + m_eff)
     J = SparseMatrixCSC{Float64,Int32}(1, n,
         Int32.(vcat(1, fill(2, n))), Int32[1], Float64[0.0])
-    return SnoptB(ws, n, 0, m_eff, x, bl, bu, hs, J, 0.0, 0, Float64[], objfun, confun)
+    return SnoptB(ws, n, 0, m_eff, n, x, bl, bu, hs, J, 0.0, 0, Float64[], objfun, confun)
 end
 
 function make_constrained_prob(ws, x0, bl_x, bu_x, bl_c, bu_c, objfun, confun, J)
@@ -35,7 +35,7 @@ function make_constrained_prob(ws, x0, bl_x, bu_x, bl_c, bu_c, objfun, confun, J
     bl   = [bl_x; bl_c]
     bu   = [bu_x; bu_c]
     hs   = zeros(Int32, n + m)
-    return SnoptB(ws, n, nc, m, x, bl, bu, hs, J, 0.0, 0, Float64[], objfun, confun)
+    return SnoptB(ws, n, nc, m, n, x, bl, bu, hs, J, 0.0, 0, Float64[], objfun, confun)
 end
 
 function make_constrained_prob_c(ws, x0, bl_x, bu_x, bl_c, bu_c, usrfun, J)
@@ -46,7 +46,7 @@ function make_constrained_prob_c(ws, x0, bl_x, bu_x, bl_c, bu_c, usrfun, J)
     bl   = [bl_x; bl_c]
     bu   = [bu_x; bu_c]
     hs   = zeros(Int32, n + m)
-    return SnoptC(ws, n, nc, m, x, bl, bu, hs, J, 0.0, 0, Float64[], usrfun)
+    return SnoptC(ws, n, nc, m, n, x, bl, bu, hs, J, 0.0, 0, Float64[], usrfun)
 end
 
 mutable struct SnoptLogCollector
@@ -60,11 +60,11 @@ end
 
 @testset "Workspace initialization" begin
     ws = initialize("", "")
-    @test ws isa Snopt.SnoptWorkspace
+    @test ws isa SNOPT.SnoptWorkspace
     @test ws.leniw > 0
-    @test ws.lenrw > 0
-    @test_throws ArgumentError Snopt.SnoptWorkspace(0, 10)
-    @test_throws ArgumentError Snopt.SnoptWorkspace(10, 0)
+    @test ws.lenrw == 60000
+    @test_throws ArgumentError SNOPT.SnoptWorkspace(0, 10)
+    @test_throws ArgumentError SNOPT.SnoptWorkspace(10, 0)
 
     ws2 = initialize("", "", 40000, 5000)
     @test ws2.leniw == 40000
@@ -76,23 +76,23 @@ end
 end
 
 @testset "Library discovery" begin
-    libdir = dirname(Snopt.libsnopt7)
+    libdir = dirname(SNOPT.libsnopt7)
     original_path = get(ENV, "PATH", "")
     withenv("SNOPTDIR" => libdir, "SNOPT_GFORTRAN_BINDIR" => "not-used") do
-        @test normpath(Snopt.find_snopt_lib()) == normpath(Snopt.libsnopt7)
+        @test normpath(SNOPT.find_snopt_lib()) == normpath(SNOPT.libsnopt7)
         @test get(ENV, "PATH", "") == original_path
     end
     mktempdir() do dir
         withenv("SNOPTDIR" => dir) do
-            @test Snopt.find_snopt_lib() == ""
+            @test SNOPT.find_snopt_lib() == ""
         end
     end
 end
 
 @testset "SNOPTB memory estimation" begin
     ws = make_ws()
-    @test Snopt.SNOPT_MEMORY_WORKSPACE >= 1000
-    memory = snmemb(ws, 1, 2, 1, 0, 0, 0, 2)
+    @test SNOPT.SNOPT_MEMORY_WORKSPACE >= 1000
+    memory = snmemb(ws, 1, 2, 1, 0, 0, 2, 0)
     @test memory isa SnoptMemory
     @test memory.info == 104
     @test memory.miniw >= 500
@@ -147,25 +147,35 @@ end
 @testset "options vector of pairs" begin
     ws = make_ws(silent=false)
 
-    @test Snopt.apply_options!(ws, [
+    @test SNOPT.apply_options!(ws, [
         "Major print level" => 0,
         :minor_print_level => 0,
         "Major feasibility tolerance" => 1.0e-8,
         :hessian => :full_memory,
     ]) === ws
 
-    @test_throws ArgumentError Snopt.apply_options!(ws, "Major print level 0")
-    @test_throws ArgumentError Snopt.apply_options!(ws, "Major print level" => 0)
-    @test_throws ArgumentError Snopt.apply_options!(ws, Dict("Major print level" => 0))
-    @test_throws ArgumentError Snopt.apply_options!(ws, ("Major print level" => 0,))
-    @test_throws ArgumentError Snopt.apply_options!(ws, ["Major print level 0"])
-    @test_throws ArgumentError Snopt.apply_options!(ws, ["Major print level" => false])
-    @test_throws ArgumentError Snopt.apply_options!(ws, ["Major feasibility tolerance" => Inf])
-    @test_throws ArgumentError Snopt.apply_options!(ws, ["Major print level" => ""])
-    @test_throws ArgumentError Snopt.apply_options!(ws, [1 => 0])
+    @test_throws ArgumentError SNOPT.apply_options!(ws, "Major print level 0")
+    @test_throws ArgumentError SNOPT.apply_options!(ws, "Major print level" => 0)
+    @test_throws ArgumentError SNOPT.apply_options!(ws, Dict("Major print level" => 0))
+    @test_throws ArgumentError SNOPT.apply_options!(ws, ("Major print level" => 0,))
+    @test_throws ArgumentError SNOPT.apply_options!(ws, ["Major print level 0"])
+    @test_throws ArgumentError SNOPT.apply_options!(ws, ["Major print level" => false])
+    @test_throws ArgumentError SNOPT.apply_options!(ws, ["Major feasibility tolerance" => Inf])
+    @test_throws ArgumentError SNOPT.apply_options!(ws, ["Major print level" => ""])
+    @test_throws ArgumentError SNOPT.apply_options!(ws, [1 => 0])
 
     @test_throws ArgumentError snmemb(2, 4, 8, 8, 2, 4, 4;
                                      options = ["Major print level 0"])
+end
+
+@testset "initialize guards missing library" begin
+    original_libsnopt7 = SNOPT.libsnopt7
+    try
+        @eval SNOPT libsnopt7 = ""
+        @test_throws ErrorException initialize("", "", 1000, 1000)
+    finally
+        @eval SNOPT libsnopt7 = $original_libsnopt7
+    end
 end
 
 @testset "public validation and callback exceptions" begin
@@ -176,7 +186,7 @@ end
         ws.iw
     )
     @test objfun isa Function
-    @test Snopt.callback_state(objfun) isa Snopt.SnoptCallbackState
+    @test SNOPT.callback_state(objfun) isa SNOPT.SnoptCallbackState
     prob = make_unconstrained_prob(
         ws, [0.0], [-10.0], [10.0], objfun, make_dummy_confun()
     )
@@ -251,20 +261,20 @@ end
 end
 
 @testset "SNOPT_STATUS dictionary" begin
-    @test Snopt.SNOPT_STATUS[1]   == :Solve_Succeeded
-    @test Snopt.SNOPT_STATUS[2]   == :Feasible_Point_Found
-    @test Snopt.SNOPT_STATUS[11]  == :Infeasible_Problem_Detected
-    @test Snopt.SNOPT_STATUS[21]  == :Unbounded_Problem_Detected
-    @test Snopt.SNOPT_STATUS[31]  == :Maximum_Iterations_Exceeded
-    @test Snopt.SNOPT_STATUS[33]  == :Maximum_Iterations_Exceeded
-    @test Snopt.SNOPT_STATUS[34]  == :Maximum_CpuTime_Exceeded
-    @test Snopt.SNOPT_STATUS[41]  == :Numerical_Difficulties
-    @test Snopt.SNOPT_STATUS[71]  == :User_Requested_Stop
-    @test Snopt.SNOPT_STATUS[81]  == :Insufficient_Memory
-    @test Snopt.SNOPT_STATUS[84]  == :Insufficient_Memory
-    @test Snopt.SNOPT_STATUS[141] == :Internal_Error
-    @test Snopt.SNOPT_STATUS[142] == :Internal_Error
-    @test Snopt.SNOPT_STATUS[999] == :Internal_Error
+    @test SNOPT.SNOPT_STATUS[1]   == :Solve_Succeeded
+    @test SNOPT.SNOPT_STATUS[2]   == :Feasible_Point_Found
+    @test SNOPT.SNOPT_STATUS[11]  == :Infeasible_Problem_Detected
+    @test SNOPT.SNOPT_STATUS[21]  == :Unbounded_Problem_Detected
+    @test SNOPT.SNOPT_STATUS[31]  == :Maximum_Iterations_Exceeded
+    @test SNOPT.SNOPT_STATUS[33]  == :Maximum_Iterations_Exceeded
+    @test SNOPT.SNOPT_STATUS[34]  == :Maximum_CpuTime_Exceeded
+    @test SNOPT.SNOPT_STATUS[41]  == :Numerical_Difficulties
+    @test SNOPT.SNOPT_STATUS[71]  == :User_Requested_Stop
+    @test SNOPT.SNOPT_STATUS[81]  == :Insufficient_Memory
+    @test SNOPT.SNOPT_STATUS[84]  == :Insufficient_Memory
+    @test SNOPT.SNOPT_STATUS[141] == :Internal_Error
+    @test SNOPT.SNOPT_STATUS[142] == :Internal_Error
+    @test SNOPT.SNOPT_STATUS[999] == :Internal_Error
 end
 
 @testset "read_options" begin
@@ -309,6 +319,28 @@ end
     @test result.memory.miniw > 0
     @test result.memory.minrw > 0
     @test !hasproperty(result, :problem)
+end
+
+@testset "Default workspace handles medium unconstrained problem" begin
+    ws = make_ws()
+    n = 50
+    target = collect(1.0:n)
+    objfun = make_objfun(
+        x -> sum(abs2, x .- target),
+        (g, x) -> begin g .= 2 .* (x .- target) end,
+        ws.iw
+    )
+    prob = make_unconstrained_prob(
+        ws,
+        zeros(n),
+        fill(-100.0, n),
+        fill(100.0, n),
+        objfun,
+        make_dummy_confun()
+    )
+    status = snopt!(prob)
+    @test status == 1
+    @test prob.obj_val ≈ 0.0 atol=1.0e-6
 end
 
 # ---------------------------------------------------------------------------
@@ -519,6 +551,7 @@ end
         Int32[1,1,2,2,3,3,4,4],   # col indices
         ones(8), 2, 4
     )
+    original_jnz = copy(J.nzval)
 
     objfun = make_objfun(eval_obj, eval_grad!, ws.iw; callback=progress)
     confun = make_confun(eval_con!, eval_jac!, J, ws.iw; callback=progress)
@@ -545,12 +578,14 @@ end
     @test prob.x[4]      ≈ 1.3791   atol=1e-3
     @test any(event -> event.kind === :objective, events)
     @test any(event -> event.kind === :constraint && length(event.c) == 2, events)
+    @test J.nzval == original_jnz
 end
 
 @testset "HS71 with SnoptC (combined callback)" begin
     ws = make_ws()
     events = NamedTuple[]
     progress = event -> begin push!(events, event); true end
+    collector = SnoptLogCollector(SnoptMajorLog[])
 
     function eval_obj_c(x)
         x[1]*x[4]*(x[1]+x[2]+x[3]) + x[3]
@@ -595,7 +630,7 @@ end
         J
     )
 
-    status = snoptc!(prob)
+    status = snoptc!(prob; snlog = collector)
     @test status == 1
     @test prob.obj_val ≈ 17.0140 atol=1e-3
     @test prob.x[1] ≈ 1.0 atol=1e-3
@@ -603,6 +638,42 @@ end
     @test prob.x[3] ≈ 3.8211 atol=1e-3
     @test prob.x[4] ≈ 1.3791 atol=1e-3
     @test any(event -> event.kind === :combined && length(event.c) == 2, events)
+    @test !isempty(collector.logs)
+    @test collector.logs[end] isa SnoptMajorLog
+end
+
+@testset "SnoptC rejects inconsistent Jacobian sparsity" begin
+    ws = make_ws()
+    set_option!(ws, "Derivative option", 3)
+    J_actual = sparse(
+        Int32[1,2,1,2,1,2,1,2],
+        Int32[1,1,2,2,3,3,4,4],
+        ones(8), 2, 4
+    )
+    J_mismatched = sparse(
+        Int32[1],
+        Int32[1],
+        ones(1), 2, 4
+    )
+    usrfun = make_usrfun_c(
+        x -> x[1]^2,
+        (g, x) -> begin fill!(g, 0.0); g[1] = 2x[1] end,
+        (c, x) -> begin c[1] = x[1]; c[2] = x[2] end,
+        (jnz, x) -> fill!(jnz, 0.0),
+        J_mismatched,
+        ws.iw
+    )
+    prob = make_constrained_prob_c(
+        ws,
+        [1.0, 5.0, 5.0, 1.0],
+        ones(4),
+        5 * ones(4),
+        [0.0, 0.0],
+        [1e20, 1e20],
+        usrfun,
+        J_actual
+    )
+    @test_throws DimensionMismatch snoptc!(prob)
 end
 
 # ---------------------------------------------------------------------------
@@ -674,6 +745,6 @@ end
 
     status = snopt!(prob)
     @test called[]
-    @test status ∈ keys(Snopt.SNOPT_STATUS)   # some valid inform code
-    @test Snopt.SNOPT_STATUS[status] === :User_Requested_Stop
+    @test status ∈ keys(SNOPT.SNOPT_STATUS)   # some valid inform code
+    @test SNOPT.SNOPT_STATUS[status] === :User_Requested_Stop
 end

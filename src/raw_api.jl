@@ -1,6 +1,6 @@
 function specs_status_message(info::Int)
     info == 101 && return "Specs file read successfully."
-    info == 131 && return "No Specs file specified (iSpecs ≤ 0 or iSpecs > 99)."
+    info == 131 && return "No Specs file specified (iSpecs ≤ 0 or iSpecs > 99)."  # unreachable via f_snspecf filename path
     info == 132 && return "End-of-file while looking for Specs file (Begin not found)."
     info == 133 && return "End-of-file before finding End."
     info == 134 && return "Endrun found before any valid options."
@@ -139,7 +139,7 @@ function snoptb!(prob::SnoptWorkspace, start::String, name::String,
                               Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cint},
                               Ptr{UInt8}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
                               Ptr{Cdouble}, Ptr{Cint}))
-    valJ = J.nzval
+    valJ = copy(J.nzval)
     indJ = convert(Array{Cint}, J.rowval)
     locJ = convert(Array{Cint}, J.colptr)
     neJ  = length(valJ)
@@ -234,7 +234,8 @@ function snoptb!(prob::SnoptWorkspace, start::String, name::String,
     return Int(prob.status)
 end
 
-function snoptc!(prob::SnoptC; start::String = "Cold", name::String = "Julia")
+function snoptc!(prob::SnoptC; start::String = "Cold", name::String = "Julia",
+                 snlog=nothing)
     total = prob.n + prob.m_eff
     require_dimension(
         total == length(prob.x) == length(prob.bl) == length(prob.bu),
@@ -255,7 +256,7 @@ function snoptc!(prob::SnoptC; start::String = "Cold", name::String = "Julia")
                                Ptr{Cdouble}, Ptr{Cint}, Ptr{UInt8},
                                Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
                                Ptr{Cdouble}, Ptr{Cint}))
-    valJ = prob.J.nzval
+    valJ = copy(prob.J.nzval)
     indJ = convert(Array{Cint}, prob.J.rowval)
     locJ = convert(Array{Cint}, prob.J.colptr)
     neJ  = length(valJ)
@@ -268,32 +269,79 @@ function snoptc!(prob::SnoptC; start::String = "Cold", name::String = "Julia")
     minrw   = Int32[0]
     nnCon = prob.nc
     nnJac = prob.nc > 0 ? prob.n : 0
-    reset_callback_exception!(usrfun)
-    GC.@preserve usrfun begin
-        ccall((:f_snoptc, libsnopt7), Cvoid,
-              (Cint, Cstring,
-               Cint, Cint, Cint, Cint, Cint, Cint,
-               Cint, Cdouble,
-               Ptr{Cvoid},
-               Ptr{Cdouble}, Ptr{Cint}, Ptr{Cint},
-               Ptr{Float64}, Ptr{Float64}, Ptr{Cint},
-               Ptr{Float64}, Ptr{Float64}, Ptr{Float64},
-               Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble}, Ptr{Cdouble},
-               Ptr{Cint}, Ptr{Cint},
-               Ptr{Cint}, Cint, Ptr{Cdouble}, Cint,
-               Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
-              start_mode_code(start), name,
-              prob.m_eff, prob.n, neJ, nnCon, prob.n, nnJac,
-              0, 0.0,
-              usr_callback,
-              valJ, indJ, locJ,
-              prob.bl, prob.bu, prob.hs, prob.ws.x, pi_, prob.ws.lambda,
-              status, nS, nInf, sInf, obj_val,
-              miniw, minrw,
-              prob.ws.iu, prob.ws.leniu, prob.ws.ru, prob.ws.lenru,
-              prob.ws.iw, prob.ws.leniw, prob.ws.rw, prob.ws.lenrw)
+    start_code = start_mode_code(start)
+    if snlog === nothing
+        reset_callback_exception!(usrfun)
+        GC.@preserve usrfun begin
+            ccall((:f_snoptc, libsnopt7), Cvoid,
+                  (Cint, Cstring,
+                   Cint, Cint, Cint, Cint, Cint, Cint,
+                   Cint, Cdouble,
+                   Ptr{Cvoid},
+                   Ptr{Cdouble}, Ptr{Cint}, Ptr{Cint},
+                   Ptr{Float64}, Ptr{Float64}, Ptr{Cint},
+                   Ptr{Float64}, Ptr{Float64}, Ptr{Float64},
+                   Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble}, Ptr{Cdouble},
+                   Ptr{Cint}, Ptr{Cint},
+                   Ptr{Cint}, Cint, Ptr{Cdouble}, Cint,
+                   Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
+                  start_code, name,
+                  prob.m_eff, prob.n, neJ, nnCon, prob.nnobj, nnJac,
+                  0, 0.0,
+                  usr_callback,
+                  valJ, indJ, locJ,
+                  prob.bl, prob.bu, prob.hs, prob.ws.x, pi_, prob.ws.lambda,
+                  status, nS, nInf, sInf, obj_val,
+                  miniw, minrw,
+                  prob.ws.iu, prob.ws.leniu, prob.ws.ru, prob.ws.lenru,
+                  prob.ws.iw, prob.ws.leniw, prob.ws.rw, prob.ws.lenrw)
+        end
+        rethrow_callback_exception!(usrfun)
+    else
+        snlog_fn = make_snlog(snlog)
+        snlog_callback = @cfunction($snlog_fn, Cvoid,
+            (Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+             Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+             Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+             Ptr{Cdouble}, Ptr{Cint}, Ptr{Cdouble}, Ptr{Cdouble},
+             Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble},
+             Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble},
+             Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+             Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble},
+             Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble},
+             Ptr{UInt8}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+             Ptr{Cdouble}, Ptr{Cint}, Ptr{UInt8}, Ptr{Cint},
+             Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble}, Ptr{Cint}))
+        null_callback = Ptr{Cvoid}(C_NULL)
+        reset_callback_exception!(usrfun, snlog_fn)
+        GC.@preserve usrfun snlog_fn begin
+            ccall((:f_snkerc, libsnopt7), Cvoid,
+                  (Cint, Cstring,
+                   Cint, Cint, Cint, Cint, Cint, Cint,
+                   Cint, Cdouble,
+                   Ptr{Cvoid},
+                   Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid},
+                   Ptr{Cdouble}, Ptr{Cint}, Ptr{Cint},
+                   Ptr{Float64}, Ptr{Float64}, Ptr{Cint},
+                   Ptr{Float64}, Ptr{Float64}, Ptr{Float64},
+                   Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble}, Ptr{Cdouble},
+                   Ptr{Cint}, Ptr{Cint},
+                   Ptr{Cint}, Cint, Ptr{Cdouble}, Cint,
+                   Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
+                  start_code, name,
+                  prob.m_eff, prob.n, neJ, nnCon, prob.nnobj, nnJac,
+                  0, 0.0,
+                  usr_callback,
+                  snlog_callback, null_callback, null_callback, null_callback,
+                  valJ, indJ, locJ,
+                  prob.bl, prob.bu, prob.hs, prob.ws.x, pi_, prob.ws.lambda,
+                  status, nS, nInf, sInf, obj_val,
+                  miniw, minrw,
+                  prob.ws.iu, prob.ws.leniu, prob.ws.ru, prob.ws.lenru,
+                  prob.ws.iw, prob.ws.leniw, prob.ws.rw, prob.ws.lenrw)
+        end
+        rethrow_callback_exception!(usrfun, snlog_fn)
     end
-    rethrow_callback_exception!(usrfun)
     prob.status  = Int(status[1])
     prob.obj_val = obj_val[1]
     prob.lambda  = prob.ws.lambda
