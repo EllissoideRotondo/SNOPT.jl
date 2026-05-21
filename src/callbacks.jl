@@ -66,6 +66,341 @@ function rethrow_callback_exception!(callbacks...)
     return nothing
 end
 
+abstract type AbstractActiveSnoptCallbacks end
+
+mutable struct ActiveSnoptACallbacks <: AbstractActiveSnoptCallbacks
+    usrfun::Function
+    exception::Any
+end
+ActiveSnoptACallbacks(usrfun::Function) = ActiveSnoptACallbacks(usrfun, nothing)
+
+mutable struct ActiveSnoptBCallbacks <: AbstractActiveSnoptCallbacks
+    confun::Function
+    objfun::Function
+    snlog::Any
+    exception::Any
+end
+ActiveSnoptBCallbacks(confun::Function, objfun::Function; snlog=nothing) =
+    ActiveSnoptBCallbacks(confun, objfun, snlog, nothing)
+
+mutable struct ActiveSnoptCCallbacks <: AbstractActiveSnoptCallbacks
+    usrfun::Function
+    snlog::Any
+    exception::Any
+end
+ActiveSnoptCCallbacks(usrfun::Function; snlog=nothing) =
+    ActiveSnoptCCallbacks(usrfun, snlog, nothing)
+
+mutable struct ActiveSnoptCallbackRegistry
+    next_id::Int32
+    callbacks::Dict{Int32,AbstractActiveSnoptCallbacks}
+    lock::ReentrantLock
+end
+
+const ACTIVE_SNOPT_CALLBACKS = ActiveSnoptCallbackRegistry(
+    Int32(0), Dict{Int32,AbstractActiveSnoptCallbacks}(), ReentrantLock())
+
+function next_active_callback_id!(registry::ActiveSnoptCallbackRegistry)
+    attempts = 0
+    id = registry.next_id
+    while attempts < typemax(Int32)
+        id = id == typemax(Int32) ? Int32(1) : id + Int32(1)
+        if !haskey(registry.callbacks, id)
+            registry.next_id = id
+            return id
+        end
+        attempts += 1
+    end
+    error("SNOPT active callback registry exhausted Int32 ids")
+end
+
+function register_active_snopt_callbacks!(callbacks::AbstractActiveSnoptCallbacks)
+    registry = ACTIVE_SNOPT_CALLBACKS
+    lock(registry.lock)
+    try
+        id = next_active_callback_id!(registry)
+        registry.callbacks[id] = callbacks
+        return id
+    finally
+        unlock(registry.lock)
+    end
+end
+
+function unregister_active_snopt_callbacks!(id::Int32)
+    registry = ACTIVE_SNOPT_CALLBACKS
+    lock(registry.lock)
+    try
+        delete!(registry.callbacks, id)
+    finally
+        unlock(registry.lock)
+    end
+    return nothing
+end
+
+function active_snopt_callback_count()
+    registry = ACTIVE_SNOPT_CALLBACKS
+    lock(registry.lock)
+    try
+        return length(registry.callbacks)
+    finally
+        unlock(registry.lock)
+    end
+end
+
+function with_active_snopt_callbacks(f::Function, ws::SnoptWorkspace,
+                                     callbacks::AbstractActiveSnoptCallbacks)
+    old_iu = ws.iu
+    old_leniu = ws.leniu
+    callback_id = register_active_snopt_callbacks!(callbacks)
+    ws.iu = Int32[callback_id]
+    ws.leniu = 1
+    try
+        return f()
+    finally
+        unregister_active_snopt_callbacks!(callback_id)
+        ws.iu = old_iu
+        ws.leniu = old_leniu
+    end
+end
+
+function active_callback_id(iu_::Ptr{Cint}, leniu_::Ptr{Cint})
+    leniu = Int(unsafe_load(leniu_))
+    leniu >= 1 || error("SNOPT callback user integer workspace has no active callback id")
+    id = Int32(unsafe_load(iu_))
+    id > 0 || error("SNOPT callback user integer workspace has invalid callback id $id")
+    return id
+end
+
+function active_snopt_callbacks(iu_::Ptr{Cint}, leniu_::Ptr{Cint})
+    id = active_callback_id(iu_, leniu_)
+    registry = ACTIVE_SNOPT_CALLBACKS
+    lock(registry.lock)
+    try
+        callbacks = get(registry.callbacks, id, nothing)
+        callbacks === nothing &&
+            error("SNOPT callback registry has no active state for id $id")
+        return callbacks
+    finally
+        unlock(registry.lock)
+    end
+end
+
+function active_snopta_callbacks(iu_::Ptr{Cint}, leniu_::Ptr{Cint})
+    callbacks = active_snopt_callbacks(iu_, leniu_)
+    callbacks isa ActiveSnoptACallbacks ||
+        error("SNOPT callback registry state mismatch for SnoptA callback")
+    return callbacks
+end
+
+function active_snoptb_callbacks(iu_::Ptr{Cint}, leniu_::Ptr{Cint})
+    callbacks = active_snopt_callbacks(iu_, leniu_)
+    callbacks isa ActiveSnoptBCallbacks ||
+        error("SNOPT callback registry state mismatch for SnoptB callback")
+    return callbacks
+end
+
+function active_snoptc_callbacks(iu_::Ptr{Cint}, leniu_::Ptr{Cint})
+    callbacks = active_snopt_callbacks(iu_, leniu_)
+    callbacks isa ActiveSnoptCCallbacks ||
+        error("SNOPT callback registry state mismatch for SnoptC callback")
+    return callbacks
+end
+
+function record_active_callback_exception!(callbacks::ActiveSnoptACallbacks, err)
+    callbacks.exception === nothing && (callbacks.exception = err)
+    return nothing
+end
+function record_active_callback_exception!(callbacks::ActiveSnoptBCallbacks, err)
+    callbacks.exception === nothing && (callbacks.exception = err)
+    return nothing
+end
+function record_active_callback_exception!(callbacks::ActiveSnoptCCallbacks, err)
+    callbacks.exception === nothing && (callbacks.exception = err)
+    return nothing
+end
+
+function rethrow_active_callback_exception!(callbacks::AbstractActiveSnoptCallbacks)
+    if callbacks.exception !== nothing
+        err = callbacks.exception
+        callbacks.exception = nothing
+        throw(err)
+    end
+    return nothing
+end
+
+function snopta_usrfun_trampoline(
+    status_::Ptr{Cint}, n_::Ptr{Cint}, x_::Ptr{Cdouble},
+    needF_::Ptr{Cint}, neF_::Ptr{Cint}, F_::Ptr{Cdouble},
+    needG_::Ptr{Cint}, neG_::Ptr{Cint}, G_::Ptr{Cdouble},
+    cu_::Ptr{UInt8}, lencu_::Ptr{Cint}, iu_::Ptr{Cint}, leniu_::Ptr{Cint},
+    ru_::Ptr{Cdouble}, lenru_::Ptr{Cint})::Cvoid
+    callbacks = nothing
+    try
+        callbacks = active_snopta_callbacks(iu_, leniu_)
+        callbacks.usrfun(status_, n_, x_, needF_, neF_, F_, needG_, neG_, G_,
+                         cu_, lencu_, iu_, leniu_, ru_, lenru_)
+    catch err
+        callbacks !== nothing && record_active_callback_exception!(callbacks, err)
+        unsafe_store!(status_, Cint(-1))
+    end
+    return
+end
+
+function snoptb_objfun_trampoline(
+    mode_::Ptr{Cint}, nnobj_::Ptr{Cint}, x_::Ptr{Cdouble},
+    f_::Ptr{Cdouble}, g_::Ptr{Cdouble}, nstate_::Ptr{Cint},
+    cu_::Ptr{UInt8}, lencu_::Ptr{Cint}, iu_::Ptr{Cint}, leniu_::Ptr{Cint},
+    ru_::Ptr{Cdouble}, lenru_::Ptr{Cint})::Cvoid
+    callbacks = nothing
+    try
+        callbacks = active_snoptb_callbacks(iu_, leniu_)
+        callbacks.objfun(mode_, nnobj_, x_, f_, g_, nstate_,
+                         cu_, lencu_, iu_, leniu_, ru_, lenru_)
+    catch err
+        callbacks !== nothing && record_active_callback_exception!(callbacks, err)
+        unsafe_store!(mode_, Cint(-1))
+    end
+    return
+end
+
+function snoptb_confun_trampoline(
+    mode_::Ptr{Cint}, nncon_::Ptr{Cint}, nnjac_::Ptr{Cint},
+    nstate_::Ptr{Cint}, x_::Ptr{Cdouble}, c_::Ptr{Cdouble},
+    J_::Ptr{Cdouble}, needc_::Ptr{Cint},
+    cu_::Ptr{UInt8}, lencu_::Ptr{Cint}, iu_::Ptr{Cint}, leniu_::Ptr{Cint},
+    ru_::Ptr{Cdouble}, lenru_::Ptr{Cint})::Cvoid
+    callbacks = nothing
+    try
+        callbacks = active_snoptb_callbacks(iu_, leniu_)
+        callbacks.confun(mode_, nncon_, nnjac_, nstate_, x_, c_, J_, needc_,
+                         cu_, lencu_, iu_, leniu_, ru_, lenru_)
+    catch err
+        callbacks !== nothing && record_active_callback_exception!(callbacks, err)
+        unsafe_store!(mode_, Cint(-1))
+    end
+    return
+end
+
+function snoptc_usrfun_trampoline(
+    mode_::Ptr{Cint}, nnobj_::Ptr{Cint}, nncon_::Ptr{Cint},
+    nnjac_::Ptr{Cint}, nnL_::Ptr{Cint}, negcon_::Ptr{Cint},
+    x_::Ptr{Cdouble}, fobj_::Ptr{Cdouble}, gobj_::Ptr{Cdouble},
+    fcon_::Ptr{Cdouble}, gcon_::Ptr{Cdouble}, status_::Ptr{Cint},
+    cu_::Ptr{UInt8}, lencu_::Ptr{Cint}, iu_::Ptr{Cint}, leniu_::Ptr{Cint},
+    ru_::Ptr{Cdouble}, lenru_::Ptr{Cint})::Cvoid
+    callbacks = nothing
+    try
+        callbacks = active_snoptc_callbacks(iu_, leniu_)
+        callbacks.usrfun(mode_, nnobj_, nncon_, nnjac_, nnL_, negcon_,
+                         x_, fobj_, gobj_, fcon_, gcon_, status_,
+                         cu_, lencu_, iu_, leniu_, ru_, lenru_)
+    catch err
+        callbacks !== nothing && record_active_callback_exception!(callbacks, err)
+        unsafe_store!(status_, Cint(-1))
+    end
+    return
+end
+
+function snopt_snlog_trampoline(
+    iAbort_::Ptr{Cint}, KTcond_::Ptr{Cint},
+    MjrPrt_::Ptr{Cint}, minimz_::Ptr{Cint},
+    n_::Ptr{Cint}, nb_::Ptr{Cint}, nnCon0_::Ptr{Cint},
+    nnObj_::Ptr{Cint}, nS_::Ptr{Cint},
+    itn_::Ptr{Cint}, nMajor_::Ptr{Cint},
+    nMinor_::Ptr{Cint}, nSwap_::Ptr{Cint},
+    condHz_::Ptr{Cdouble}, iObj_::Ptr{Cint},
+    sclObj_::Ptr{Cdouble}, ObjAdd_::Ptr{Cdouble},
+    fObj_::Ptr{Cdouble}, fMrt_::Ptr{Cdouble},
+    PenNrm_::Ptr{Cdouble}, step_::Ptr{Cdouble},
+    prInf_::Ptr{Cdouble}, duInf_::Ptr{Cdouble},
+    vimax_::Ptr{Cdouble}, virel_::Ptr{Cdouble},
+    hs_::Ptr{Cint}, ne_::Ptr{Cint},
+    nlocJ_::Ptr{Cint}, locJ_::Ptr{Cint},
+    indJ_::Ptr{Cint}, Jcol_::Ptr{Cdouble},
+    Ascale_::Ptr{Cdouble}, bl_::Ptr{Cdouble},
+    bu_::Ptr{Cdouble}, Fx_::Ptr{Cdouble},
+    fCon_::Ptr{Cdouble}, yCon_::Ptr{Cdouble},
+    x_::Ptr{Cdouble}, cu_::Ptr{UInt8},
+    lencu_::Ptr{Cint}, iu_::Ptr{Cint},
+    leniu_::Ptr{Cint}, ru_::Ptr{Cdouble},
+    lenru_::Ptr{Cint}, cw_::Ptr{UInt8},
+    lencw_::Ptr{Cint}, iw_::Ptr{Cint},
+    leniw_::Ptr{Cint}, rw_::Ptr{Cdouble},
+    lenrw_::Ptr{Cint})::Cvoid
+    callbacks = nothing
+    try
+        callbacks = active_snopt_callbacks(iu_, leniu_)
+        snlog = callbacks.snlog
+        snlog === nothing && error("SNOPT snLog callback invoked without active snLog state")
+        snlog(iAbort_, KTcond_, MjrPrt_, minimz_, n_, nb_, nnCon0_, nnObj_,
+              nS_, itn_, nMajor_, nMinor_, nSwap_, condHz_, iObj_, sclObj_,
+              ObjAdd_, fObj_, fMrt_, PenNrm_, step_, prInf_, duInf_, vimax_,
+              virel_, hs_, ne_, nlocJ_, locJ_, indJ_, Jcol_, Ascale_, bl_,
+              bu_, Fx_, fCon_, yCon_, x_, cu_, lencu_, iu_, leniu_, ru_,
+              lenru_, cw_, lencw_, iw_, leniw_, rw_, lenrw_)
+    catch err
+        callbacks !== nothing && record_active_callback_exception!(callbacks, err)
+        unsafe_store!(iAbort_, Cint(1))
+    end
+    return
+end
+
+const SNOPTA_CALLBACK_PTR = Ref{Ptr{Cvoid}}(C_NULL)
+const SNOPTB_OBJ_CALLBACK_PTR = Ref{Ptr{Cvoid}}(C_NULL)
+const SNOPTB_CON_CALLBACK_PTR = Ref{Ptr{Cvoid}}(C_NULL)
+const SNOPTC_CALLBACK_PTR = Ref{Ptr{Cvoid}}(C_NULL)
+const SNOPT_SNLOG_CALLBACK_PTR = Ref{Ptr{Cvoid}}(C_NULL)
+
+function init_callback_pointers!()
+    SNOPTA_CALLBACK_PTR[] = @cfunction(snopta_usrfun_trampoline, Cvoid,
+        (Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble},
+         Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble},
+         Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble},
+         Ptr{UInt8}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+         Ptr{Cdouble}, Ptr{Cint}))
+
+    SNOPTB_OBJ_CALLBACK_PTR[] = @cfunction(snoptb_objfun_trampoline, Cvoid,
+        (Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble},
+         Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cint},
+         Ptr{UInt8}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+         Ptr{Cdouble}, Ptr{Cint}))
+
+    SNOPTB_CON_CALLBACK_PTR[] = @cfunction(snoptb_confun_trampoline, Cvoid,
+        (Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble},
+         Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cint},
+         Ptr{UInt8}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+         Ptr{Cdouble}, Ptr{Cint}))
+
+    SNOPTC_CALLBACK_PTR[] = @cfunction(snoptc_usrfun_trampoline, Cvoid,
+        (Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+         Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble},
+         Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble},
+         Ptr{Cdouble}, Ptr{Cint}, Ptr{UInt8},
+         Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+         Ptr{Cdouble}, Ptr{Cint}))
+
+    SNOPT_SNLOG_CALLBACK_PTR[] = @cfunction(snopt_snlog_trampoline, Cvoid,
+        (Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+         Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+         Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+         Ptr{Cdouble}, Ptr{Cint}, Ptr{Cdouble}, Ptr{Cdouble},
+         Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble},
+         Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble},
+         Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+         Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble},
+         Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble},
+         Ptr{UInt8}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+         Ptr{Cdouble}, Ptr{Cint}, Ptr{UInt8}, Ptr{Cint},
+         Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble}, Ptr{Cint}))
+    return nothing
+end
+
+function snopt_callback_pointer(ptr::Base.RefValue{Ptr{Cvoid}})
+    callback = ptr[]
+    callback == C_NULL && error("SNOPT callback pointers were not initialized")
+    return callback
+end
+
 """
     make_snlog(callback)
 Create a Julia callback compatible with SNOPT's `snLog` hook. `callback` is

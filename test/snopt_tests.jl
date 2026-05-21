@@ -212,6 +212,7 @@ end
     )
     @test objfun isa Function
     @test SNOPT.callback_state(objfun) isa SNOPT.SnoptCallbackState
+    @test SNOPT.active_snopt_callback_count() == 0
     prob = make_unconstrained_prob(
         ws, [0.0], [-10.0], [10.0], objfun, make_dummy_confun()
     )
@@ -235,6 +236,7 @@ end
         options = silent_options,
         callback = _ -> error("progress boom")
     )
+    @test SNOPT.active_snopt_callback_count() == 0
 end
 
 @testset "SnoptA toy problem" begin
@@ -283,6 +285,9 @@ end
     @test prob.x[1] ≈ 0.0 atol=1.0e-4
     @test prob.x[2] ≈ -1.0 atol=1.0e-4
     @test any(event -> event.kind === :function, events)
+    @test prob.ws.iu == Int32[0]
+    @test prob.ws.leniu == 0
+    @test SNOPT.active_snopt_callback_count() == 0
 end
 
 @testset "SNOPT_STATUS dictionary" begin
@@ -404,6 +409,9 @@ end
     @test any(event -> event.kind === :objective, events)
     @test all(event -> event.x isa Vector{Float64}, events)
     @test all(event -> event.major_iter >= 0 && event.minor_iter >= 0, events)
+    @test prob.ws.iu == Int32[0]
+    @test prob.ws.leniu == 0
+    @test SNOPT.active_snopt_callback_count() == 0
 end
 
 @testset "snLog major iteration callback" begin
@@ -437,6 +445,9 @@ end
     @test any(log -> log.major_iter > 0, logs)
     @test logs[end].major_iter == prob.ws.major_itns
     @test minimum(abs(log.objective - prob.obj_val) for log in logs) <= 1e-6
+    @test prob.ws.iu == Int32[0]
+    @test prob.ws.leniu == 0
+    @test SNOPT.active_snopt_callback_count() == 0
 end
 
 @testset "Rosenbrock (unconstrained)" begin
@@ -665,6 +676,9 @@ end
     @test any(event -> event.kind === :combined && length(event.c) == 2, events)
     @test !isempty(collector.logs)
     @test collector.logs[end] isa SnoptMajorLog
+    @test prob.ws.iu == Int32[0]
+    @test prob.ws.leniu == 0
+    @test SNOPT.active_snopt_callback_count() == 0
 end
 
 @testset "SnoptC rejects inconsistent Jacobian sparsity" begin
@@ -699,6 +713,9 @@ end
         J_actual
     )
     @test_throws DimensionMismatch snoptc!(prob)
+    @test prob.ws.iu == Int32[0]
+    @test prob.ws.leniu == 0
+    @test SNOPT.active_snopt_callback_count() == 0
 end
 
 # ---------------------------------------------------------------------------

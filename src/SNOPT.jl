@@ -61,6 +61,7 @@ function __init__()
         libiomp5 = replace(libsnopt7, "libsnopt7" => "libiomp5")
         isfile(libiomp5) && Libdl.dlopen(libiomp5)
     end
+    init_callback_pointers!()
 end
 
 has_snopt() = !isempty(libsnopt7)
