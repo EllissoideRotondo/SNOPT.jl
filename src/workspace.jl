@@ -1,13 +1,65 @@
+# Tracks the init_id of the workspace most recently passed to f_sninitx.
+# On Linux, SNOPT's Fortran common blocks are global and are associated with the
+# most recently initialized workspace. Calling f_snend on a superseded workspace
+# corrupts the active workspace's state, causing subsequent solves to fail with
+# status 82 (Insufficient_Memory) or 91 (Invalid_Problem_Definition).
+# Using atomics here is intentional: ReentrantLock must not be acquired inside
+# a Julia GC finalizer (risk of deadlock), but atomic CAS is safe.
+const _SNOPT_ACTIVE_ID  = Threads.Atomic{Int}(0)
+const _SNOPT_ID_COUNTER = Threads.Atomic{Int}(0)
+const _SNOPT_ACTIVE_WORKSPACE = Ref{Any}(nothing)
+
+function reset_snopt_defaults!(prob::SnoptWorkspace)
+    optstring = "Defaults"
+    errors = Int32[0]
+    ccall((:f_snset, libsnopt7), Cvoid,
+          (Cstring, Cint, Ptr{Cint},
+           Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
+          optstring, Cint(ncodeunits(optstring)), errors,
+          prob.iw, prob.leniw, prob.rw, prob.lenrw)
+    errors[1] == 0 ||
+        error("SNOPT rejected Defaults option during workspace initialization")
+    return prob
+end
+
 function free!(prob::SnoptWorkspace)
     prob.finalized && return nothing
     prob.finalized = true
-    isempty(libsnopt7) && return nothing
-    try
-        ccall((:f_snend, libsnopt7),
-              Cvoid, (Ptr{Cint}, Cint, Ptr{Float64}, Cint),
-              prob.iw, prob.leniw, prob.rw, prob.lenrw)
-    catch
-        # Finalizers may run during shutdown when the shared library is gone.
+    if !isempty(libsnopt7)
+        # Only call f_snend for the workspace that last called f_sninitx. Any
+        # older workspace that gets GC'd after being superseded skips the
+        # Fortran call.
+        id = prob.init_id
+        should_end = id == 0 || Threads.atomic_cas!(_SNOPT_ACTIVE_ID, id, 0) == id
+        if should_end
+            try
+                ccall((:f_snend, libsnopt7),
+                      Cvoid, (Ptr{Cint}, Cint, Ptr{Float64}, Cint),
+                      prob.iw, prob.leniw, prob.rw, prob.lenrw)
+            catch
+                # Finalizers may run during shutdown when the shared library
+                # is gone.
+            end
+        end
+    end
+    for path in prob.tempfiles
+        try
+            isfile(path) && rm(path; force=true)
+        catch
+            # Temporary output cleanup should never make finalization fail.
+        end
+    end
+    empty!(prob.tempfiles)
+    _SNOPT_ACTIVE_WORKSPACE[] === prob && (_SNOPT_ACTIVE_WORKSPACE[] = nothing)
+    return nothing
+end
+
+function close_active_workspace!()
+    active = _SNOPT_ACTIVE_WORKSPACE[]
+    if active isa SnoptWorkspace && !active.finalized
+        free!(active)
+    else
+        _SNOPT_ACTIVE_WORKSPACE[] = nothing
     end
     return nothing
 end
@@ -30,6 +82,21 @@ workspace_value(ws_rw::Vector{Float64}, index::Int) =
 const SNOPT_DEVNULL = Sys.iswindows() ? "" : "/dev/null"
 
 snopt_output_file(path::String) = isempty(path) ? SNOPT_DEVNULL : path
+
+function snopt_output_files(printfile::String, summfile::String)
+    printpath = snopt_output_file(printfile)
+    summpath = snopt_output_file(summfile)
+    tempfiles = String[]
+    if isempty(printfile) && isempty(summfile)
+        # The Linux library can become stateful in surprising ways when both
+        # SNOPT output channels are opened on the null device across mixed solves.
+        # Keep the print channel suppressed and give the summary channel a real,
+        # throwaway file.
+        summpath = tempname()
+        push!(tempfiles, summpath)
+    end
+    return printpath, summpath, tempfiles
+end
 
 const SNOPT_STATUS = Dict(
     1  => :Solve_Succeeded,
@@ -107,14 +174,20 @@ function initialize(printfile::String, summfile::String, leniw::Int, lenrw::Int)
         "SNOPT library not loaded. Set SNOPTDIR (or DYLD_LIBRARY_PATH on macOS) " *
         "to the directory containing libsnopt7 and restart Julia, " *
         "or call SNOPT.find_snopt_lib() to diagnose.")
+    close_active_workspace!()
     prob = SnoptWorkspace(leniw, lenrw)
-    printpath = snopt_output_file(printfile)
-    summpath = snopt_output_file(summfile)
+    printpath, summpath, tempfiles = snopt_output_files(printfile, summfile)
+    append!(prob.tempfiles, tempfiles)
+    new_id = Threads.atomic_add!(_SNOPT_ID_COUNTER, 1) + 1
+    prob.init_id = new_id
+    Threads.atomic_xchg!(_SNOPT_ACTIVE_ID, new_id)
     ccall((:f_sninitx, libsnopt7), Cvoid,
           (Cstring, Cint, Cstring, Cint,
            Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
           printpath, Cint(ncodeunits(printpath)), summpath, Cint(ncodeunits(summpath)),
           prob.iw, prob.leniw, prob.rw, prob.lenrw)
+    reset_snopt_defaults!(prob)
+    _SNOPT_ACTIVE_WORKSPACE[] = prob
     return prob
 end
 

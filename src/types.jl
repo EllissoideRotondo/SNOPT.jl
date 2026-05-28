@@ -1,8 +1,10 @@
 mutable struct SnoptWorkspace
     status::Int
     finalized::Bool
+    init_id::Int       # ID of the f_sninitx call; 0 = not yet initialized via f_sninitx
     leniw::Int
     lenrw::Int
+    tempfiles::Vector{String}
     iw::Vector{Int32}
     rw::Vector{Float64}
     leniu::Int
@@ -20,7 +22,7 @@ mutable struct SnoptWorkspace
     function SnoptWorkspace(leniw::Int, lenrw::Int)
         leniw > 0 || throw(ArgumentError("leniw must be positive"))
         lenrw > 0 || throw(ArgumentError("lenrw must be positive"))
-        prob = new(0, false, leniw, lenrw,
+        prob = new(0, false, 0, leniw, lenrw, String[],
                    zeros(Int32, leniw), zeros(Float64, lenrw),
                    0, 0,
                    Int32[0], [0.0],

@@ -91,6 +91,32 @@ function snopt_result(prob::SnoptB, memory::SnoptMemory)
                        memory)
 end
 
+function preflight_callbacks!(eval_obj::Function, eval_grad::Function,
+                              eval_con, eval_jac, x::Vector{Float64},
+                              nc::Int, J::SparseMatrixCSC, callback)
+    xcheck = copy(x)
+    f = eval_obj(xcheck)
+    if callback !== nothing
+        event = (kind = :objective, mode = 0, major_iter = 0, minor_iter = 0,
+                 x = copy(xcheck), f = f)
+        call_progress(callback, event)
+    end
+    gcheck = zeros(length(xcheck))
+    eval_grad(gcheck, xcheck)
+    if nc > 0
+        ccheck = zeros(nc)
+        eval_con(ccheck, xcheck)
+        if callback !== nothing
+            event = (kind = :constraint, mode = 0, major_iter = 0, minor_iter = 0,
+                     x = copy(xcheck), c = copy(ccheck))
+            call_progress(callback, event)
+        end
+        jcheck = zeros(nnz(J))
+        eval_jac(jcheck, xcheck)
+    end
+    return nothing
+end
+
 """
     snopt(eval_obj, eval_grad, x0; kwargs...) -> SnoptResult
 Solve a nonlinear optimization problem with SNOPTB using Julia callbacks.
@@ -139,6 +165,8 @@ function snopt(eval_obj::Function, eval_grad::Function,
     nnCon = nc
     nnJac = nc > 0 ? n : 0
     nnObj = n
+    preflight_callbacks!(eval_obj, eval_grad, eval_con, eval_jac, x0_vector,
+                         nc, J32, callback)
     memory = check_memory_estimate(
         snmemb(m_eff, n, neJ, negCon, nnCon, nnObj, nnJac;
                options, printfile, summfile))
