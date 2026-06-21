@@ -1,10 +1,7 @@
 name = "SNOPT"
 uuid = "09fd284b-e7b0-4fba-b41f-c39527135ddd"
-version = "0.1.0"
+version = "0.2.1"
 authors = ["Alex Pascarella <alex.pascarella@proton.me>"]
-
-[workspace]
-projects = ["examples", "test"]
 
 [deps]
 Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
@@ -18,4 +15,3 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
 test = ["Test"]
-

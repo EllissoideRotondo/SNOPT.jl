@@ -1,8 +1,10 @@
 mutable struct SnoptWorkspace
     status::Int
     finalized::Bool
+    init_id::Int       # ID of the f_sninitx call; 0 = not yet initialized via f_sninitx
     leniw::Int
     lenrw::Int
+    tempfiles::Vector{String}
     iw::Vector{Int32}
     rw::Vector{Float64}
     leniu::Int
@@ -18,9 +20,13 @@ mutable struct SnoptWorkspace
     major_itns::Int
     run_time::Float64
     function SnoptWorkspace(leniw::Int, lenrw::Int)
-        leniw > 0 || throw(ArgumentError("leniw must be positive"))
-        lenrw > 0 || throw(ArgumentError("lenrw must be positive"))
-        prob = new(0, false, leniw, lenrw,
+        # SNOPT's sninit writes a fixed-size header into iw/rw and requires at
+        # least 500 elements in each. Smaller arrays let f_sninitx write out of
+        # bounds, which silently corrupts the heap and later segfaults, so reject
+        # them before any allocation reaches the Fortran side.
+        leniw >= 500 || throw(ArgumentError("leniw must be >= 500 (SNOPT work-array minimum), got $leniw"))
+        lenrw >= 500 || throw(ArgumentError("lenrw must be >= 500 (SNOPT work-array minimum), got $lenrw"))
+        prob = new(0, false, 0, leniw, lenrw, String[],
                    zeros(Int32, leniw), zeros(Float64, lenrw),
                    0, 0,
                    Int32[0], [0.0],
@@ -66,6 +72,7 @@ mutable struct SnoptB{F1<:Function, F2<:Function} <: AbstractSnoptProblem
     n::Int                            # num design variables
     nc::Int                           # num nonlinear constraints
     m_eff::Int                        # effective m passed to Fortran (>= 1; nc when nc>0, else 1)
+    nnobj::Int                        # num nonlinear objective variables (<= n)
     x::Vector{Float64}                # [n+m_eff] extended point (initial / final)
     bl::Vector{Float64}               # [n+m_eff] lower bounds
     bu::Vector{Float64}               # [n+m_eff] upper bounds
@@ -85,6 +92,7 @@ mutable struct SnoptC{F<:Function} <: AbstractSnoptProblem
     n::Int                            # num design variables
     nc::Int                           # num nonlinear constraints
     m_eff::Int                        # effective m passed to Fortran
+    nnobj::Int                        # num nonlinear objective variables (<= n)
     x::Vector{Float64}                # [n+m_eff] extended point (initial / final)
     bl::Vector{Float64}               # [n+m_eff] lower bounds
     bu::Vector{Float64}               # [n+m_eff] upper bounds

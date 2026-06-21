@@ -1,6 +1,6 @@
 function specs_status_message(info::Int)
     info == 101 && return "Specs file read successfully."
-    info == 131 && return "No Specs file specified (iSpecs ≤ 0 or iSpecs > 99)."
+    info == 131 && return "No Specs file specified (iSpecs ≤ 0 or iSpecs > 99)."  # unreachable via f_snspecf filename path
     info == 132 && return "End-of-file while looking for Specs file (Begin not found)."
     info == 133 && return "End-of-file before finding End."
     info == 134 && return "Endrun found before any valid options."
@@ -9,6 +9,9 @@ function specs_status_message(info::Int)
 end
 
 function read_options(prob::SnoptWorkspace, specsfile::String)
+    require_open_workspace(prob, "read_options")
+    isfile(specsfile) ||
+        throw(ArgumentError("read_options: specs file not found: $(repr(specsfile))"))
     status = Int32[0]
     ccall((:f_snspecf, libsnopt7), Cvoid,
           (Cstring, Cint, Ptr{Cint},
@@ -30,6 +33,7 @@ function require_dimension(condition::Bool, message::AbstractString)
 end
 
 function snopta!(prob::SnoptA; start::String = "Cold", name::String = "Julia")
+    require_open_workspace(prob.ws, "snopta!")
     require_dimension(
         prob.n == length(prob.x) == length(prob.xlow) == length(prob.xupp),
         "SnoptA variable arrays must all have length n=$(prob.n)")
@@ -51,49 +55,48 @@ function snopta!(prob::SnoptA; start::String = "Cold", name::String = "Julia")
     prob.ws.iu = Int32[0]
     prob.ws.ru = [0.0]
     usrfun = prob.usrfun
-    usr_callback = @cfunction($usrfun, Cvoid,
-                              (Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble},
-                               Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble},
-                               Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble},
-                               Ptr{UInt8}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
-                               Ptr{Cdouble}, Ptr{Cint}))
+    usr_callback = snopt_callback_pointer(SNOPTA_CALLBACK_PTR)
     status = Int32[0]
     nS     = Int32[prob.nS]
     nInf   = Int32[0]
     sInf   = [0.0]
     miniw  = Int32[0]
     minrw  = Int32[0]
-    reset_callback_exception!(usrfun)
-    GC.@preserve usrfun begin
-        ccall((:f_snopta, libsnopt7), Cvoid,
-              (Cint, Cstring,
-               Cint, Cint, Cdouble, Cint,
-               Ptr{Cvoid},
-               Ptr{Cint}, Ptr{Cint}, Cint, Ptr{Cdouble},
-               Ptr{Cint}, Ptr{Cint}, Cint,
-               Ptr{Cdouble}, Ptr{Cdouble},
-               Ptr{Cdouble}, Ptr{Cdouble},
-               Ptr{Cdouble}, Ptr{Cint}, Ptr{Cdouble},
-               Ptr{Cdouble}, Ptr{Cint}, Ptr{Cdouble},
-               Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble},
-               Ptr{Cint}, Ptr{Cint},
-               Ptr{Cint}, Cint, Ptr{Cdouble}, Cint,
-               Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
-              start_mode_code(start), name,
-              prob.nf, prob.n, prob.objadd, prob.objrow,
-              usr_callback,
-              prob.iAfun, prob.jAvar, length(prob.A), prob.A,
-              prob.iGfun, prob.jGvar, length(prob.iGfun),
-              prob.xlow, prob.xupp,
-              prob.flow, prob.fupp,
-              prob.x, prob.xstate, prob.xmul,
-              prob.F, prob.Fstate, prob.Fmul,
-              status, nS, nInf, sInf,
-              miniw, minrw,
-              prob.ws.iu, prob.ws.leniu, prob.ws.ru, prob.ws.lenru,
-              prob.ws.iw, prob.ws.leniw, prob.ws.rw, prob.ws.lenrw)
+    active_callbacks = ActiveSnoptACallbacks(usrfun)
+    with_active_snopt_callbacks(prob.ws, active_callbacks) do
+        reset_callback_exception!(usrfun)
+        GC.@preserve usrfun begin
+            ccall((:f_snopta, libsnopt7), Cvoid,
+                  (Cint, Cstring,
+                   Cint, Cint, Cdouble, Cint,
+                   Ptr{Cvoid},
+                   Ptr{Cint}, Ptr{Cint}, Cint, Ptr{Cdouble},
+                   Ptr{Cint}, Ptr{Cint}, Cint,
+                   Ptr{Cdouble}, Ptr{Cdouble},
+                   Ptr{Cdouble}, Ptr{Cdouble},
+                   Ptr{Cdouble}, Ptr{Cint}, Ptr{Cdouble},
+                   Ptr{Cdouble}, Ptr{Cint}, Ptr{Cdouble},
+                   Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble},
+                   Ptr{Cint}, Ptr{Cint},
+                   Ptr{Cint}, Cint, Ptr{Cdouble}, Cint,
+                   Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
+                  start_mode_code(start), name,
+                  prob.nf, prob.n, prob.objadd, prob.objrow,
+                  usr_callback,
+                  prob.iAfun, prob.jAvar, length(prob.A), prob.A,
+                  prob.iGfun, prob.jGvar, length(prob.iGfun),
+                  prob.xlow, prob.xupp,
+                  prob.flow, prob.fupp,
+                  prob.x, prob.xstate, prob.xmul,
+                  prob.F, prob.Fstate, prob.Fmul,
+                  status, nS, nInf, sInf,
+                  miniw, minrw,
+                  prob.ws.iu, prob.ws.leniu, prob.ws.ru, prob.ws.lenru,
+                  prob.ws.iw, prob.ws.leniw, prob.ws.rw, prob.ws.lenrw)
+        end
+        rethrow_callback_exception!(usrfun)
+        rethrow_active_callback_exception!(active_callbacks)
     end
-    rethrow_callback_exception!(usrfun)
     prob.status = Int(status[1])
     prob.nS = Int(nS[1])
     prob.num_inf = Int(nInf[1])
@@ -117,6 +120,7 @@ function snoptb!(prob::SnoptWorkspace, start::String, name::String,
                  J::SparseMatrixCSC, bl::Vector{Float64}, bu::Vector{Float64},
                  hs::Vector{Int32}, x::Vector{Float64};
                  snlog=nothing)
+    require_open_workspace(prob, "snoptb!")
     total = n + m
     require_dimension(
         total == length(x) == length(bl) == length(bu),
@@ -129,17 +133,9 @@ function snoptb!(prob::SnoptWorkspace, start::String, name::String,
     prob.x      = copy(x)
     prob.lambda = zeros(Float64, n + m)
     pi_         = zeros(Float64, m)
-    obj_callback = @cfunction($objfun, Cvoid,
-                             (Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble},
-                              Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cint},
-                              Ptr{UInt8}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
-                              Ptr{Cdouble}, Ptr{Cint}))
-    con_callback = @cfunction($confun, Cvoid,
-                             (Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble},
-                              Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cint},
-                              Ptr{UInt8}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
-                              Ptr{Cdouble}, Ptr{Cint}))
-    valJ = J.nzval
+    obj_callback = snopt_callback_pointer(SNOPTB_OBJ_CALLBACK_PTR)
+    con_callback = snopt_callback_pointer(SNOPTB_CON_CALLBACK_PTR)
+    valJ = copy(J.nzval)
     indJ = convert(Array{Cint}, J.rowval)
     locJ = convert(Array{Cint}, J.colptr)
     neJ  = length(valJ)
@@ -152,76 +148,70 @@ function snoptb!(prob::SnoptWorkspace, start::String, name::String,
     minrw   = Int32[0]
     start_code = start_mode_code(start)
     if snlog === nothing
-        reset_callback_exception!(confun, objfun)
-        GC.@preserve confun objfun begin
-            ccall((:f_snoptb, libsnopt7), Cvoid,
-                  (Cint, Cstring,
-                   Cint, Cint, Cint, Cint, Cint, Cint,
-                   Cint, Cdouble,
-                   Ptr{Cvoid}, Ptr{Cvoid},
-                   Ptr{Cdouble}, Ptr{Cint}, Ptr{Cint},
-                   Ptr{Float64}, Ptr{Float64}, Ptr{Cint},
-                   Ptr{Float64}, Ptr{Float64}, Ptr{Float64},
-                   Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble}, Ptr{Cdouble},
-                   Ptr{Cint}, Ptr{Cint},
-                   Ptr{Cint}, Cint, Ptr{Cdouble}, Cint,
-                   Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
-                  start_code, name, m, n, neJ, nnCon, nnObj, nnJac,
-                  iObj, fObj,
-                  con_callback, obj_callback,
-                  valJ, indJ, locJ,
-                  bl, bu, hs, prob.x, pi_, prob.lambda,
-                  status, nS, nInf, sInf, obj_val,
-                  miniw, minrw,
-                  prob.iu, prob.leniu, prob.ru, prob.lenru,
-                  prob.iw, prob.leniw, prob.rw, prob.lenrw)
+        active_callbacks = ActiveSnoptBCallbacks(confun, objfun)
+        with_active_snopt_callbacks(prob, active_callbacks) do
+            reset_callback_exception!(confun, objfun)
+            GC.@preserve confun objfun begin
+                ccall((:f_snoptb, libsnopt7), Cvoid,
+                      (Cint, Cstring,
+                       Cint, Cint, Cint, Cint, Cint, Cint,
+                       Cint, Cdouble,
+                       Ptr{Cvoid}, Ptr{Cvoid},
+                       Ptr{Cdouble}, Ptr{Cint}, Ptr{Cint},
+                       Ptr{Float64}, Ptr{Float64}, Ptr{Cint},
+                       Ptr{Float64}, Ptr{Float64}, Ptr{Float64},
+                       Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble}, Ptr{Cdouble},
+                       Ptr{Cint}, Ptr{Cint},
+                       Ptr{Cint}, Cint, Ptr{Cdouble}, Cint,
+                       Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
+                      start_code, name, m, n, neJ, nnCon, nnObj, nnJac,
+                      iObj, fObj,
+                      con_callback, obj_callback,
+                      valJ, indJ, locJ,
+                      bl, bu, hs, prob.x, pi_, prob.lambda,
+                      status, nS, nInf, sInf, obj_val,
+                      miniw, minrw,
+                      prob.iu, prob.leniu, prob.ru, prob.lenru,
+                      prob.iw, prob.leniw, prob.rw, prob.lenrw)
+            end
+            rethrow_callback_exception!(confun, objfun)
+            rethrow_active_callback_exception!(active_callbacks)
         end
-        rethrow_callback_exception!(confun, objfun)
     else
         snlog_fn = make_snlog(snlog)
-        # Literal tuple required by @cfunction. Keep this in sync with the
-        # argument order documented by `make_snlog`.
-        snlog_callback = @cfunction($snlog_fn, Cvoid,
-            (Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
-             Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
-             Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
-             Ptr{Cdouble}, Ptr{Cint}, Ptr{Cdouble}, Ptr{Cdouble},
-             Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble},
-             Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble},
-             Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
-             Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble},
-             Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble},
-             Ptr{UInt8}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
-             Ptr{Cdouble}, Ptr{Cint}, Ptr{UInt8}, Ptr{Cint},
-             Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble}, Ptr{Cint}))
+        snlog_callback = snopt_callback_pointer(SNOPT_SNLOG_CALLBACK_PTR)
         null_callback = Ptr{Cvoid}(C_NULL)
-        reset_callback_exception!(confun, objfun, snlog_fn)
-        GC.@preserve confun objfun snlog_fn begin
-            ccall((:f_snkerb, libsnopt7), Cvoid,
-                  (Cint, Cstring,
-                   Cint, Cint, Cint, Cint, Cint, Cint,
-                   Cint, Cdouble,
-                   Ptr{Cvoid}, Ptr{Cvoid},
-                   Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid},
-                   Ptr{Cdouble}, Ptr{Cint}, Ptr{Cint},
-                   Ptr{Float64}, Ptr{Float64}, Ptr{Cint},
-                   Ptr{Float64}, Ptr{Float64}, Ptr{Float64},
-                   Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble}, Ptr{Cdouble},
-                   Ptr{Cint}, Ptr{Cint},
-                   Ptr{Cint}, Cint, Ptr{Cdouble}, Cint,
-                   Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
-                  start_code, name, m, n, neJ, nnCon, nnObj, nnJac,
-                  iObj, fObj,
-                  con_callback, obj_callback,
-                  snlog_callback, null_callback, null_callback, null_callback,
-                  valJ, indJ, locJ,
-                  bl, bu, hs, prob.x, pi_, prob.lambda,
-                  status, nS, nInf, sInf, obj_val,
-                  miniw, minrw,
-                  prob.iu, prob.leniu, prob.ru, prob.lenru,
-                  prob.iw, prob.leniw, prob.rw, prob.lenrw)
+        active_callbacks = ActiveSnoptBCallbacks(confun, objfun; snlog=snlog_fn)
+        with_active_snopt_callbacks(prob, active_callbacks) do
+            reset_callback_exception!(confun, objfun, snlog_fn)
+            GC.@preserve confun objfun snlog_fn begin
+                ccall((:f_snkerb, libsnopt7), Cvoid,
+                      (Cint, Cstring,
+                       Cint, Cint, Cint, Cint, Cint, Cint,
+                       Cint, Cdouble,
+                       Ptr{Cvoid}, Ptr{Cvoid},
+                       Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid},
+                       Ptr{Cdouble}, Ptr{Cint}, Ptr{Cint},
+                       Ptr{Float64}, Ptr{Float64}, Ptr{Cint},
+                       Ptr{Float64}, Ptr{Float64}, Ptr{Float64},
+                       Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble}, Ptr{Cdouble},
+                       Ptr{Cint}, Ptr{Cint},
+                       Ptr{Cint}, Cint, Ptr{Cdouble}, Cint,
+                       Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
+                      start_code, name, m, n, neJ, nnCon, nnObj, nnJac,
+                      iObj, fObj,
+                      con_callback, obj_callback,
+                      snlog_callback, null_callback, null_callback, null_callback,
+                      valJ, indJ, locJ,
+                      bl, bu, hs, prob.x, pi_, prob.lambda,
+                      status, nS, nInf, sInf, obj_val,
+                      miniw, minrw,
+                      prob.iu, prob.leniu, prob.ru, prob.lenru,
+                      prob.iw, prob.leniw, prob.rw, prob.lenrw)
+            end
+            rethrow_callback_exception!(confun, objfun, snlog_fn)
+            rethrow_active_callback_exception!(active_callbacks)
         end
-        rethrow_callback_exception!(confun, objfun, snlog_fn)
     end
     prob.status  = status[1]
     prob.obj_val = obj_val[1]
@@ -234,7 +224,9 @@ function snoptb!(prob::SnoptWorkspace, start::String, name::String,
     return Int(prob.status)
 end
 
-function snoptc!(prob::SnoptC; start::String = "Cold", name::String = "Julia")
+function snoptc!(prob::SnoptC; start::String = "Cold", name::String = "Julia",
+                 snlog=nothing)
+    require_open_workspace(prob.ws, "snoptc!")
     total = prob.n + prob.m_eff
     require_dimension(
         total == length(prob.x) == length(prob.bl) == length(prob.bu),
@@ -248,14 +240,8 @@ function snoptc!(prob::SnoptC; start::String = "Cold", name::String = "Julia")
     prob.ws.lambda = zeros(Float64, prob.n + prob.m_eff)
     pi_            = zeros(Float64, prob.m_eff)
     usrfun = prob.usrfun
-    usr_callback = @cfunction($usrfun, Cvoid,
-                              (Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
-                               Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble},
-                               Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble},
-                               Ptr{Cdouble}, Ptr{Cint}, Ptr{UInt8},
-                               Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
-                               Ptr{Cdouble}, Ptr{Cint}))
-    valJ = prob.J.nzval
+    usr_callback = snopt_callback_pointer(SNOPTC_CALLBACK_PTR)
+    valJ = copy(prob.J.nzval)
     indJ = convert(Array{Cint}, prob.J.rowval)
     locJ = convert(Array{Cint}, prob.J.colptr)
     neJ  = length(valJ)
@@ -268,32 +254,75 @@ function snoptc!(prob::SnoptC; start::String = "Cold", name::String = "Julia")
     minrw   = Int32[0]
     nnCon = prob.nc
     nnJac = prob.nc > 0 ? prob.n : 0
-    reset_callback_exception!(usrfun)
-    GC.@preserve usrfun begin
-        ccall((:f_snoptc, libsnopt7), Cvoid,
-              (Cint, Cstring,
-               Cint, Cint, Cint, Cint, Cint, Cint,
-               Cint, Cdouble,
-               Ptr{Cvoid},
-               Ptr{Cdouble}, Ptr{Cint}, Ptr{Cint},
-               Ptr{Float64}, Ptr{Float64}, Ptr{Cint},
-               Ptr{Float64}, Ptr{Float64}, Ptr{Float64},
-               Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble}, Ptr{Cdouble},
-               Ptr{Cint}, Ptr{Cint},
-               Ptr{Cint}, Cint, Ptr{Cdouble}, Cint,
-               Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
-              start_mode_code(start), name,
-              prob.m_eff, prob.n, neJ, nnCon, prob.n, nnJac,
-              0, 0.0,
-              usr_callback,
-              valJ, indJ, locJ,
-              prob.bl, prob.bu, prob.hs, prob.ws.x, pi_, prob.ws.lambda,
-              status, nS, nInf, sInf, obj_val,
-              miniw, minrw,
-              prob.ws.iu, prob.ws.leniu, prob.ws.ru, prob.ws.lenru,
-              prob.ws.iw, prob.ws.leniw, prob.ws.rw, prob.ws.lenrw)
+    start_code = start_mode_code(start)
+    if snlog === nothing
+        active_callbacks = ActiveSnoptCCallbacks(usrfun)
+        with_active_snopt_callbacks(prob.ws, active_callbacks) do
+            reset_callback_exception!(usrfun)
+            GC.@preserve usrfun begin
+                ccall((:f_snoptc, libsnopt7), Cvoid,
+                      (Cint, Cstring,
+                       Cint, Cint, Cint, Cint, Cint, Cint,
+                       Cint, Cdouble,
+                       Ptr{Cvoid},
+                       Ptr{Cdouble}, Ptr{Cint}, Ptr{Cint},
+                       Ptr{Float64}, Ptr{Float64}, Ptr{Cint},
+                       Ptr{Float64}, Ptr{Float64}, Ptr{Float64},
+                       Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble}, Ptr{Cdouble},
+                       Ptr{Cint}, Ptr{Cint},
+                       Ptr{Cint}, Cint, Ptr{Cdouble}, Cint,
+                       Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
+                      start_code, name,
+                      prob.m_eff, prob.n, neJ, nnCon, prob.nnobj, nnJac,
+                      0, 0.0,
+                      usr_callback,
+                      valJ, indJ, locJ,
+                      prob.bl, prob.bu, prob.hs, prob.ws.x, pi_, prob.ws.lambda,
+                      status, nS, nInf, sInf, obj_val,
+                      miniw, minrw,
+                      prob.ws.iu, prob.ws.leniu, prob.ws.ru, prob.ws.lenru,
+                      prob.ws.iw, prob.ws.leniw, prob.ws.rw, prob.ws.lenrw)
+            end
+            rethrow_callback_exception!(usrfun)
+            rethrow_active_callback_exception!(active_callbacks)
+        end
+    else
+        snlog_fn = make_snlog(snlog)
+        snlog_callback = snopt_callback_pointer(SNOPT_SNLOG_CALLBACK_PTR)
+        null_callback = Ptr{Cvoid}(C_NULL)
+        active_callbacks = ActiveSnoptCCallbacks(usrfun; snlog=snlog_fn)
+        with_active_snopt_callbacks(prob.ws, active_callbacks) do
+            reset_callback_exception!(usrfun, snlog_fn)
+            GC.@preserve usrfun snlog_fn begin
+                ccall((:f_snkerc, libsnopt7), Cvoid,
+                      (Cint, Cstring,
+                       Cint, Cint, Cint, Cint, Cint, Cint,
+                       Cint, Cdouble,
+                       Ptr{Cvoid},
+                       Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid},
+                       Ptr{Cdouble}, Ptr{Cint}, Ptr{Cint},
+                       Ptr{Float64}, Ptr{Float64}, Ptr{Cint},
+                       Ptr{Float64}, Ptr{Float64}, Ptr{Float64},
+                       Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble}, Ptr{Cdouble},
+                       Ptr{Cint}, Ptr{Cint},
+                       Ptr{Cint}, Cint, Ptr{Cdouble}, Cint,
+                       Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
+                      start_code, name,
+                      prob.m_eff, prob.n, neJ, nnCon, prob.nnobj, nnJac,
+                      0, 0.0,
+                      usr_callback,
+                      snlog_callback, null_callback, null_callback, null_callback,
+                      valJ, indJ, locJ,
+                      prob.bl, prob.bu, prob.hs, prob.ws.x, pi_, prob.ws.lambda,
+                      status, nS, nInf, sInf, obj_val,
+                      miniw, minrw,
+                      prob.ws.iu, prob.ws.leniu, prob.ws.ru, prob.ws.lenru,
+                      prob.ws.iw, prob.ws.leniw, prob.ws.rw, prob.ws.lenrw)
+            end
+            rethrow_callback_exception!(usrfun, snlog_fn)
+            rethrow_active_callback_exception!(active_callbacks)
+        end
     end
-    rethrow_callback_exception!(usrfun)
     prob.status  = Int(status[1])
     prob.obj_val = obj_val[1]
     prob.lambda  = prob.ws.lambda

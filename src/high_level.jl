@@ -91,6 +91,51 @@ function snopt_result(prob::SnoptB, memory::SnoptMemory)
                        memory)
 end
 
+function preflight_callbacks!(eval_obj::Function, eval_grad::Function,
+                              eval_con, eval_jac, x::Vector{Float64},
+                              nc::Int, J::SparseMatrixCSC, callback)
+    xcheck = copy(x)
+    f = eval_obj(xcheck)
+    if callback !== nothing
+        event = (kind = :objective, mode = 0, major_iter = 0, minor_iter = 0,
+                 x = copy(xcheck), f = f)
+        call_progress(callback, event) ||
+            return (status = 71, objective = Float64(f), x = copy(xcheck))
+    end
+    gcheck = zeros(length(xcheck))
+    eval_grad(gcheck, xcheck)
+    if nc > 0
+        ccheck = zeros(nc)
+        eval_con(ccheck, xcheck)
+        if callback !== nothing
+            event = (kind = :constraint, mode = 0, major_iter = 0, minor_iter = 0,
+                     x = copy(xcheck), c = copy(ccheck))
+            call_progress(callback, event) ||
+                return (status = 71, objective = Float64(f), x = copy(xcheck))
+        end
+        jcheck = zeros(nnz(J))
+        eval_jac(jcheck, xcheck)
+    end
+    return nothing
+end
+
+function preflight_stop_result(stop, n::Int, nc::Int, memory::SnoptMemory)
+    status = Int(stop.status)
+    return SnoptResult(
+        status,
+        get(SNOPT_STATUS, status, :Unknown_Status),
+        stop.objective,
+        stop.x,
+        zeros(n + nc),
+        0,
+        0.0,
+        0,
+        0,
+        0.0,
+        memory
+    )
+end
+
 """
     snopt(eval_obj, eval_grad, x0; kwargs...) -> SnoptResult
 Solve a nonlinear optimization problem with SNOPTB using Julia callbacks.
@@ -140,8 +185,12 @@ function snopt(eval_obj::Function, eval_grad::Function,
     nnJac = nc > 0 ? n : 0
     nnObj = n
     memory = check_memory_estimate(
-        snmemb(m_eff, n, neJ, negCon, nnCon, nnJac, nnObj;
+        snmemb(m_eff, n, neJ, negCon, nnCon, nnObj, nnJac;
                options, printfile, summfile))
+    preflight_stop = preflight_callbacks!(
+        eval_obj, eval_grad, eval_con, eval_jac, x0_vector, nc, J32, callback)
+    preflight_stop !== nothing &&
+        return preflight_stop_result(preflight_stop, n, nc, memory)
     ws = initialize(printfile, summfile, memory.miniw, memory.minrw)
     try
         apply_options!(ws, options)
@@ -152,7 +201,7 @@ function snopt(eval_obj::Function, eval_grad::Function,
         bl = [xlow; nc > 0 ? lcon_vector : [-SNOPT_INF]]
         bu = [xupp; nc > 0 ? ucon_vector : [SNOPT_INF]]
         hs = zeros(Int32, n + m_eff)
-        prob = SnoptB(ws, n, nc, m_eff, x, bl, bu, hs, J32,
+        prob = SnoptB(ws, n, nc, m_eff, n, x, bl, bu, hs, J32,
                       0.0, 0, Float64[], objfun, confun)
         snoptb!(prob; start, name, snlog)
         return snopt_result(prob, memory)

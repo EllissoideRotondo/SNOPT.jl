@@ -50,7 +50,7 @@ function __init__()
     global libsnopt7 = find_snopt_lib()
     if isempty(libsnopt7)
         @warn """
-              Snopt.jl: SNOPT library not found. has_snopt() returns false.
+              SNOPT.jl: SNOPT library not found. has_snopt() returns false.
               Set SNOPTDIR to the directory containing libsnopt7, or add it to the platform library path:
                   export SNOPTDIR=/path/to/snopt/lib
                   export LD_LIBRARY_PATH=/path/to/snopt/lib:\$LD_LIBRARY_PATH
@@ -58,9 +58,12 @@ function __init__()
               """
     else
         # Preload OpenMP companion library if it lives alongside libsnopt7.
+        # Use the non-throwing dlopen so a missing or incompatible companion
+        # never aborts module initialization; libsnopt7 itself already loaded.
         libiomp5 = replace(libsnopt7, "libsnopt7" => "libiomp5")
-        isfile(libiomp5) && Libdl.dlopen(libiomp5)
+        isfile(libiomp5) && Libdl.dlopen_e(libiomp5)
     end
+    init_callback_pointers!()
 end
 
 has_snopt() = !isempty(libsnopt7)
