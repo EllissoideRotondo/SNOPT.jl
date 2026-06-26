@@ -1,10 +1,11 @@
 name: CI
 
+# Run on pushes to any branch in this repo. Only collaborators can push branches
+# here, so this covers all branches you own while excluding external pull requests
+# (no `pull_request` trigger means forked PRs do not run CI for now).
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    branches: ['**']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -17,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: ['1.10', '1']
+        version: ['1.9', '1.10', '1']
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
