@@ -1,3 +1,4 @@
+using Libdl
 using SparseArrays
 
 # ---------------------------------------------------------------------------
@@ -57,6 +58,57 @@ function (collector::SnoptLogCollector)(event)
     push!(collector.logs, event)
     return true
 end
+
+# Collects snSTOP events and optionally asks SNOPT to stop once `stop_after`
+# major iterations have been seen.
+mutable struct SnoptStopCollector
+    events::Vector{SnoptStopEvent}
+    stop_after::Int
+end
+
+SnoptStopCollector() = SnoptStopCollector(SnoptStopEvent[], typemax(Int))
+
+function (collector::SnoptStopCollector)(event)
+    push!(collector.events, event)
+    return event.major_iter < collector.stop_after
+end
+
+# HS71: min x1 x4 (x1 + x2 + x3) + x3  s.t.  x1 x2 x3 x4 >= 25, sum(x.^2) == 40.
+hs71_obj(x) = x[1]*x[4]*(x[1]+x[2]+x[3]) + x[3]
+
+function hs71_grad!(g, x)
+    g[1] = x[4]*(2x[1]+x[2]+x[3])
+    g[2] = x[1]*x[4]
+    g[3] = x[1]*x[4] + 1
+    g[4] = x[1]*(x[1]+x[2]+x[3])
+    return nothing
+end
+
+function hs71_con!(c, x)
+    c[1] = x[1]*x[2]*x[3]*x[4]
+    c[2] = x[1]^2 + x[2]^2 + x[3]^2 + x[4]^2
+    return nothing
+end
+
+function hs71_jac!(jnz, x)
+    jnz[1] = x[2]*x[3]*x[4]; jnz[2] = 2x[1]
+    jnz[3] = x[1]*x[3]*x[4]; jnz[4] = 2x[2]
+    jnz[5] = x[1]*x[2]*x[4]; jnz[6] = 2x[3]
+    jnz[7] = x[1]*x[2]*x[3]; jnz[8] = 2x[4]
+    return nothing
+end
+
+hs71_sparsity() = sparse(Int32[1,2,1,2,1,2,1,2], Int32[1,1,2,2,3,3,4,4],
+                         ones(8), 2, 4)
+
+solve_hs71(; kwargs...) = snopt(
+    hs71_obj, hs71_grad!, [1.0, 5.0, 5.0, 1.0];
+    lb = ones(4), ub = 5 * ones(4),
+    eval_con = hs71_con!, eval_jac = hs71_jac!,
+    lcon = [25.0, 40.0], ucon = [1e20, 40.0],
+    J = hs71_sparsity(),
+    options = ["Major print level" => 0, "Minor print level" => 0],
+    kwargs...)
 
 @testset "Workspace initialization" begin
     ws = initialize("", "")
@@ -136,9 +188,31 @@ end
     end
     mktempdir() do dir
         withenv("SNOPTDIR" => dir) do
-            @test SNOPT.find_snopt_lib() == ""
+            # A bad SNOPTDIR now warns and falls back to the platform library
+            # path and the system loader, so on a machine with a system-wide
+            # libsnopt7 the search still succeeds.
+            found = @test_logs (:warn, r"SNOPTDIR is set but no loadable") match_mode=:any begin
+                SNOPT.find_snopt_lib()
+            end
+            syslib = Libdl.dlopen_e(string("lib", "snopt7", ".", Libdl.dlext))
+            if syslib == C_NULL
+                @test found == ""
+            else
+                Libdl.dlclose(syslib)
+                @test !isempty(found)
+            end
         end
     end
+end
+
+@testset "Library discovery rejects a library without the f_* interface" begin
+    @test :f_sninitx in SNOPT.REQUIRED_SNOPT_SYMBOLS
+    @test :f_snoptb in SNOPT.REQUIRED_SNOPT_SYMBOLS
+    # libm loads fine but exports none of SNOPT's C shims.
+    fake = string("libm.", Libdl.dlext)
+    @test SNOPT.loadable_library_path(fake) == ""
+    # The real library still passes.
+    @test SNOPT.loadable_library_path(SNOPT.libsnopt7) == SNOPT.libsnopt7
 end
 
 @testset "SNOPTB memory estimation" begin
@@ -329,6 +403,34 @@ end
     @test SNOPT.active_snopt_callback_count() == 0
 end
 
+@testset "snLog major iteration callback on SnoptA" begin
+    ws = make_ws()
+    set_option!(ws, "Derivative option", 1)
+    collector = SnoptLogCollector(SnoptMajorLog[])
+    usrfun = make_usrfun_a(
+        (F, x) -> begin F[1] = (x[1] - 2)^2 + (x[2] - 3)^2 end;
+        eval_G = (G, x) -> begin G[1] = 2(x[1] - 2); G[2] = 2(x[2] - 3) end
+    )
+    prob = SnoptA(
+        ws, 1, 2, 0.0, 1,
+        Int32[], Int32[], Float64[],
+        Int32[1, 1], Int32[1, 2],
+        [-10.0, -10.0], [10.0, 10.0],
+        [-1.0e20], [1.0e20],
+        [0.0, 0.0], zeros(Int32, 2), zeros(2),
+        zeros(1), zeros(Int32, 1), zeros(1),
+        0, 0, 0, 0.0,
+        usrfun
+    )
+    status = snopta!(prob; snlog = collector)
+    @test status == 1
+    @test prob.x[1] ≈ 2.0 atol = 1.0e-4
+    @test prob.x[2] ≈ 3.0 atol = 1.0e-4
+    @test !isempty(collector.logs)
+    @test collector.logs[end] isa SnoptMajorLog
+    @test SNOPT.active_snopt_callback_count() == 0
+end
+
 @testset "SnoptA finite-difference gradients (eval_G=nothing)" begin
     ws = make_ws()
     set_option!(ws, "Derivative option", 0)
@@ -367,7 +469,9 @@ end
     @test SNOPT.SNOPT_STATUS[11]  == :Infeasible_Problem_Detected
     @test SNOPT.SNOPT_STATUS[21]  == :Unbounded_Problem_Detected
     @test SNOPT.SNOPT_STATUS[31]  == :Maximum_Iterations_Exceeded
-    @test SNOPT.SNOPT_STATUS[33]  == :Maximum_Iterations_Exceeded
+    @test SNOPT.SNOPT_STATUS[32]  == :Maximum_Iterations_Exceeded
+    # 33 is "the superbasics limit is too small", not an iteration limit.
+    @test SNOPT.SNOPT_STATUS[33]  == :Superbasics_Limit_Too_Small
     @test SNOPT.SNOPT_STATUS[34]  == :Maximum_CpuTime_Exceeded
     @test SNOPT.SNOPT_STATUS[41]  == :Numerical_Difficulties
     @test SNOPT.SNOPT_STATUS[71]  == :User_Requested_Stop
@@ -780,6 +884,75 @@ end
     @test SNOPT.active_snopt_callback_count() == 0
 end
 
+@testset "Suppressed output survives an unwritable temp directory" begin
+    silent = ["Major print level" => 0, "Minor print level" => 0]
+    solve_once() = snopt(
+        x -> (x[1] + 3)^2,
+        (g, x) -> begin g[1] = 2(x[1] + 3) end,
+        [2.0]; lb = [-1.0], ub = [5.0], options = silent
+    )
+    @test solve_once().status == 1
+
+    mktempdir() do dir
+        readonly = joinpath(dir, "readonly")
+        mkdir(readonly)
+        chmod(readonly, 0o500)   # r-x: cannot create files
+        try
+            withenv("TMPDIR" => readonly) do
+                # The scratch file must be created somewhere writable: never an
+                # uncreated path, and never silently downgraded to the null
+                # device, which leaves SNOPT stateful across later solves.
+                _, summpath, _ = SNOPT.snopt_output_files("", "")
+                @test summpath != SNOPT.SNOPT_DEVNULL
+                @test isfile(summpath)
+                rm(summpath; force = true)
+
+                ws = initialize("", "")
+                @test isopen(ws)
+                close(ws)
+            end
+        finally
+            chmod(readonly, 0o700)   # let mktempdir clean up
+        end
+    end
+
+    # The session must still be healthy afterwards. This is the assertion that
+    # actually caught the bad null-device fallback.
+    @test solve_once().status == 1
+end
+
+@testset "Jacobian shape validation" begin
+    ws = make_ws()
+    objfun = make_objfun(
+        x -> (x[1] - 1)^2 + (x[2] - 2)^2,
+        (g, x) -> begin g[1] = 2(x[1] - 1); g[2] = 2(x[2] - 2) end,
+        ws.iw
+    )
+    n, m_eff = 2, 1
+    x  = [0.0, 0.0, 0.0]
+    bl = [-10.0, -10.0, -1.0e20]
+    bu = [10.0, 10.0, 1.0e20]
+    hs = zeros(Int32, n + m_eff)
+    # J claims a single column while the problem has n = 2, so J.colptr is one
+    # element short of the locJ(n+1) that SNOPT reads.
+    J_bad = SparseMatrixCSC{Float64,Int32}(1, 1, Int32[1, 2], Int32[1], Float64[0.0])
+    prob = SnoptB(ws, n, 0, m_eff, n, x, bl, bu, hs, J_bad,
+                  0.0, 0, Float64[], objfun, make_dummy_confun())
+    @test_throws DimensionMismatch snoptb!(prob)
+
+    J_bad_c = SparseMatrixCSC{Float64,Int32}(1, 1, Int32[1, 2], Int32[1], Float64[0.0])
+    usrfun = make_usrfun_c(
+        x -> x[1]^2,
+        (g, x) -> begin fill!(g, 0.0); g[1] = 2x[1] end,
+        (c, x) -> begin c[1] = x[1] end,
+        (jnz, x) -> fill!(jnz, 0.0),
+        J_bad_c, ws.iw
+    )
+    probc = SnoptC(ws, n, 1, 1, n, x, bl, bu, hs, J_bad_c,
+                   0.0, 0, Float64[], usrfun)
+    @test_throws DimensionMismatch snoptc!(probc)
+end
+
 @testset "SnoptC rejects inconsistent Jacobian sparsity" begin
     ws = make_ws()
     set_option!(ws, "Derivative option", 3)
@@ -868,6 +1041,182 @@ end
     @test called[]
 end
 
+@testset "Superbasics count is retained after a solve" begin
+    ws = make_ws()
+    objfun = make_objfun(
+        x -> (x[1] - 1)^2 + (x[2] - 2)^2,
+        (g, x) -> begin g[1] = 2(x[1] - 1); g[2] = 2(x[2] - 2) end,
+        ws.iw
+    )
+    prob = make_unconstrained_prob(
+        ws, [0.0, 0.0], fill(-10.0, 2), fill(10.0, 2), objfun, make_dummy_confun()
+    )
+    @test prob.nS == 0
+    @test snoptb!(prob) == 1
+    # The value SNOPT returned must reach both the problem and the workspace
+    # rather than being discarded. Do not assert a particular count: how many
+    # variables end up superbasic is a solver detail. The warm-start test is
+    # what proves the retained value is useful.
+    @test prob.nS == prob.ws.nS
+    @test prob.nS >= 0
+    @test prob.ws.nS >= 0
+end
+
+struct ShiftedQuadratic
+    target::Vector{Float64}
+end
+(q::ShiftedQuadratic)(x) = sum(abs2, x .- q.target)
+
+struct ShiftedGradient
+    target::Vector{Float64}
+end
+(q::ShiftedGradient)(g, x) = (g .= 2 .* (x .- q.target); nothing)
+
+@testset "Callable structs work as objective and gradient" begin
+    target = [1.0, 2.0]
+    result = snopt(
+        ShiftedQuadratic(target), ShiftedGradient(target), [0.0, 0.0];
+        lb = -10.0, ub = 10.0,
+        options = ["Major print level" => 0, "Minor print level" => 0]
+    )
+    @test result.status == 1
+    @test result.x ≈ target atol = 1.0e-5
+end
+
+@testset "Concurrent solves are serialized" begin
+    if Threads.nthreads() > 1
+        results = Vector{Any}(undef, 8)
+        Threads.@threads for i in 1:8
+            results[i] = snopt(
+                x -> (x[1] - 1)^2 + (x[2] - 2)^2,
+                (g, x) -> begin g[1] = 2(x[1] - 1); g[2] = 2(x[2] - 2) end,
+                [0.0, 0.0];
+                lb = -10.0, ub = 10.0,
+                options = ["Major print level" => 0, "Minor print level" => 0]
+            )
+        end
+        @test all(r -> r.status == 1, results)
+        @test all(r -> isapprox(r.x, [1.0, 2.0]; atol = 1.0e-5), results)
+    else
+        @info "single-threaded session; skipping concurrency test"
+        @test true
+    end
+end
+
+@testset "NaN input validation" begin
+    silent_options = ["Major print level" => 0, "Minor print level" => 0]
+    f = x -> (x[1] - 1)^2
+    g! = (g, x) -> begin g[1] = 2(x[1] - 1) end
+    @test_throws ArgumentError snopt(f, g!, [NaN]; options = silent_options)
+    @test_throws ArgumentError snopt(f, g!, [Inf]; options = silent_options)
+    @test_throws ArgumentError snopt(f, g!, [0.0]; lb = [NaN], options = silent_options)
+    @test_throws ArgumentError snopt(f, g!, [0.0]; ub = [NaN], options = silent_options)
+    @test_throws ArgumentError snopt(f, g!, [0.0]; lb = NaN, options = silent_options)
+    @test_throws ArgumentError snopt(
+        f, g!, [0.0];
+        eval_con = (c, x) -> begin c[1] = x[1] end,
+        eval_jac = (jnz, x) -> begin jnz[1] = 1.0 end,
+        lcon = [NaN], ucon = [1.0],
+        options = silent_options
+    )
+end
+
+@testset "set_option! rejects non-finite values" begin
+    ws = make_ws()
+    @test_throws ArgumentError set_option!(ws, "Major feasibility tolerance", NaN)
+    @test_throws ArgumentError set_option!(ws, "Major feasibility tolerance", Inf)
+    @test_throws ArgumentError set_option!(ws, "Major feasibility tolerance", -Inf)
+    # A finite value still works after the rejections.
+    @test set_option!(ws, "Major feasibility tolerance", 1e-7) == 0
+end
+
+@testset "Preflight clamps x0 into bounds" begin
+    # sqrt is undefined below 0; SNOPT projects x0 into [lb, ub] before its
+    # first evaluation, and the preflight check must do the same instead of
+    # probing the raw out-of-bounds x0.
+    result = snopt(
+        x -> sqrt(x[1]),
+        (g, x) -> begin g[1] = 0.5 / sqrt(x[1]) end,
+        [-5.0];
+        lb = [1.0], ub = [10.0],
+        options = ["Major print level" => 0, "Minor print level" => 0]
+    )
+    @test result.status == 1
+    @test result.x[1] ≈ 1.0 atol = 1e-6
+end
+
+@testset "Warm start reuses a basis and costs no more iterations" begin
+    silent = ["Major print level" => 0, "Minor print level" => 0]
+    f  = x -> (x[1] - 1)^2 + (x[2] - 2)^2 + 0.5 * (x[1] * x[2] - 2)^2
+    g! = (g, x) -> begin
+        g[1] = 2(x[1] - 1) + (x[1] * x[2] - 2) * x[2]
+        g[2] = 2(x[2] - 2) + (x[1] * x[2] - 2) * x[1]
+    end
+
+    solved = snopt(f, g!, [0.0, 0.0]; lb = -10.0, ub = 10.0, options = silent)
+    @test solved.status == 1
+    @test solved.basis isa SnoptBasis
+    @test length(solved.basis.hs) == 2 + 1
+    @test solved.basis.n == 2
+    @test solved.basis.m == 1
+
+    perturbed = solved.x .+ 0.25
+    cold = snopt(f, g!, perturbed; lb = -10.0, ub = 10.0, options = silent)
+    warm = snopt(f, g!, perturbed; lb = -10.0, ub = 10.0, options = silent,
+                 start = "Warm", basis = solved.basis)
+    @test warm.status == 1
+    @test warm.x ≈ cold.x atol = 1.0e-5
+    @test warm.major_itns <= cold.major_itns
+
+    # A basis whose dimensions do not match the problem is rejected.
+    @test_throws ArgumentError snopt(f, g!, [0.0, 0.0, 0.0];
+        lb = -10.0, ub = 10.0, options = silent,
+        start = "Warm", basis = solved.basis)
+    # A warm start without a basis is rejected rather than silently going cold.
+    @test_throws ArgumentError snopt(f, g!, perturbed;
+        lb = -10.0, ub = 10.0, options = silent, start = "Warm")
+    # A basis passed to a cold start is a mistake worth reporting.
+    @test_throws ArgumentError snopt(f, g!, perturbed;
+        lb = -10.0, ub = 10.0, options = silent, basis = solved.basis)
+end
+
+@testset "Warm start (snOptA)" begin
+    ws = make_ws()
+    set_option!(ws, "Derivative option", 1)
+    usrfun = make_usrfun_a(
+        (F, x) -> begin F[1] = (x[1] - 2)^2 end;
+        eval_G = (G, x) -> begin G[1] = 2(x[1] - 2) end
+    )
+    prob = SnoptA(
+        ws, 1, 1, 0.0, 1,
+        Int32[], Int32[], Float64[],
+        Int32[1], Int32[1],
+        [-10.0], [10.0],
+        [-1.0e20], [1.0e20],
+        [0.0], zeros(Int32, 1), zeros(1),
+        zeros(1), zeros(Int32, 1), zeros(1),
+        0, 0, 0, 0.0,
+        usrfun
+    )
+    @test snopta!(prob) == 1
+    @test prob.x[1] ≈ 2.0 atol = 1e-4
+    # Re-solve from the solution with SNOPT's warm start (integer code 2 for
+    # snOptA; code 1 would request a basis-file start).
+    @test snopta!(prob; start = "Warm") == 1
+    @test prob.x[1] ≈ 2.0 atol = 1e-4
+    @test_throws ArgumentError snopta!(prob; start = "Tepid")
+end
+
+@testset "Direct SnoptWorkspace close without initialize" begin
+    # A workspace that never went through f_sninitx (init_id == 0) must not
+    # call f_snend on its zeroed work arrays during finalization.
+    ws = SNOPT.SnoptWorkspace(500, 500)
+    @test isopen(ws)
+    @test ws.init_id == 0
+    close(ws)
+    @test !isopen(ws)
+end
+
 @testset "User-requested stop via progress callback" begin
     ws = make_ws()
     called = Ref(false)
@@ -888,4 +1237,126 @@ end
     @test called[]
     @test status ∈ keys(SNOPT.SNOPT_STATUS)   # some valid inform code
     @test SNOPT.SNOPT_STATUS[status] === :User_Requested_Stop
+end
+
+
+@testset "snSTOP major iteration callback" begin
+    stops = SnoptStopCollector()
+    logs = SnoptLogCollector(SnoptMajorLog[])
+    result = solve_hs71(snlog = logs, snstop = stops)
+
+    @test result.status == 1
+    @test result.objective ≈ 17.0140 atol = 1e-3
+    @test !isempty(stops.events)
+    @test all(e -> e isa SnoptStopEvent, stops.events)
+
+    # SNOPT calls snSTOP once per major iteration, in order.
+    @test [e.major_iter for e in stops.events] == sort(unique(e.major_iter for e in stops.events))
+    @test stops.events[end].major_iter == result.major_itns
+
+    # The dimensions SNOPT hands to snSTOP must describe this problem. These
+    # assertions are what pins down the Fortran argument order: a shifted
+    # argument list shows up here as garbage rather than as 4 variables and
+    # 2 constraints.
+    last = stops.events[end]
+    @test last.n == 4
+    @test last.m == 2
+    @test last.nb == 6
+    @test last.nncon == 2
+    @test last.nnobj == 4
+    @test last.negcon == 8
+    @test last.minimize == 1
+    @test last.max_superbasics >= last.n_superbasics
+
+    # ...and so do the vectors, which must match values we can compute here.
+    @test length(last.x) == last.nb
+    @test last.x[1:4] ≈ result.x atol = 1e-8
+    @test last.bl == [1.0, 1.0, 1.0, 1.0, 25.0, 40.0]
+    @test last.bu[1:4] == fill(5.0, 4)
+    expected_fcon = zeros(2); hs71_con!(expected_fcon, last.x[1:4])
+    expected_gobj = zeros(4); hs71_grad!(expected_gobj, last.x[1:4])
+    expected_gcon = zeros(8); hs71_jac!(expected_gcon, last.x[1:4])
+    @test last.fcon ≈ expected_fcon
+    @test last.fx ≈ expected_fcon
+    @test last.gobj ≈ expected_gobj
+    @test last.gcon ≈ expected_gcon
+    @test length(last.ycon) == 2
+    @test length(last.pi) == 2
+    @test length(last.rc) == last.nb
+    @test length(last.rg) == last.max_superbasics
+    @test length(last.hs) == last.nb
+
+    # snLog and snSTOP see the same major iteration, so their shared fields
+    # must agree; this catches a drift in either argument list.
+    @test length(logs.logs) == length(stops.events)
+    for (log, stop) in zip(logs.logs, stops.events)
+        @test log.major_iter == stop.major_iter
+        @test log.minor_iter == stop.minor_iter
+        @test log.iteration == stop.iteration
+        @test log.n_superbasics == stop.n_superbasics
+        @test log.objective == stop.objective
+        @test log.primal_infeasibility == stop.primal_infeasibility
+        @test log.dual_infeasibility == stop.dual_infeasibility
+        @test log.step == stop.step
+        @test log.x == stop.x
+        @test log.hs == stop.hs
+    end
+    @test SNOPT.active_snopt_callback_count() == 0
+end
+
+@testset "snSTOP requests early termination" begin
+    stops = SnoptStopCollector(SnoptStopEvent[], 2)
+    result = solve_hs71(snstop = stops)
+
+    @test SNOPT.SNOPT_STATUS[result.status] === :User_Requested_Stop
+    @test stops.events[end].major_iter == 2
+    @test result.major_itns <= 3
+    @test SNOPT.active_snopt_callback_count() == 0
+end
+
+@testset "snSTOP propagates callback exceptions" begin
+    thrown = ErrorException("snSTOP callback failed")
+    @test_throws ErrorException solve_hs71(snstop = _ -> throw(thrown))
+    @test SNOPT.active_snopt_callback_count() == 0
+end
+
+@testset "snSTOP on SnoptA and SnoptC" begin
+    ws = make_ws()
+    set_option!(ws, "Derivative option", 1)
+    stops = SnoptStopCollector()
+    usrfun = make_usrfun_a(
+        (F, x) -> begin F[1] = (x[1] - 2)^2 + (x[2] - 3)^2 end;
+        eval_G = (G, x) -> begin G[1] = 2(x[1] - 2); G[2] = 2(x[2] - 3) end
+    )
+    prob = SnoptA(
+        ws, 1, 2, 0.0, 1,
+        Int32[], Int32[], Float64[],
+        Int32[1, 1], Int32[1, 2],
+        [-10.0, -10.0], [10.0, 10.0],
+        [-1.0e20], [1.0e20],
+        [0.0, 0.0], zeros(Int32, 2), zeros(2),
+        zeros(1), zeros(Int32, 1), zeros(1),
+        0, 0, 0, 0.0,
+        usrfun
+    )
+    @test snopta!(prob; snstop = stops) == 1
+    @test prob.x[1] ≈ 2.0 atol = 1.0e-4
+    @test !isempty(stops.events)
+    @test stops.events[end].n == 2
+    close(ws)
+
+    ws_c = make_ws()
+    stops_c = SnoptStopCollector()
+    J = hs71_sparsity()
+    usrfun_c = make_usrfun_c(hs71_obj, hs71_grad!, hs71_con!, hs71_jac!, J, ws_c.iw)
+    prob_c = make_constrained_prob_c(
+        ws_c, [1.0, 5.0, 5.0, 1.0], ones(4), 5 * ones(4),
+        [25.0, 40.0], [1e20, 40.0], usrfun_c, J
+    )
+    @test snoptc!(prob_c; snstop = stops_c) == 1
+    @test prob_c.obj_val ≈ 17.0140 atol = 1e-3
+    @test !isempty(stops_c.events)
+    @test stops_c.events[end].n == 4
+    @test stops_c.events[end].m == 2
+    @test SNOPT.active_snopt_callback_count() == 0
 end

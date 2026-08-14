@@ -6,6 +6,8 @@ name: CI
 on:
   push:
     branches: ['**']
+  pull_request:
+    branches: ['**']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -13,12 +15,16 @@ concurrency:
 
 jobs:
   test:
-    name: Julia ${{ matrix.version }} - ${{ matrix.os }}
+    # GitHub-hosted runners have no SNOPT license/library, so runtests.jl skips
+    # every solver assertion: this job only checks that the package loads and
+    # that the no-library paths behave. The full suite runs locally (Linux +
+    # Windows VM) against a licensed libsnopt7.
+    name: Julia ${{ matrix.version }} - ${{ matrix.os }} (no solver lib)
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        version: ['1.9', '1.10', '1']
+        version: ['1.10', '1']
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4

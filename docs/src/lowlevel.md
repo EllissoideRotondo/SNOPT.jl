@@ -36,14 +36,16 @@ end
 ```
 
 !!! warning "One active solve per process"
-    SNOPT solves are process-serial: run one solve at a time per Julia process,
-    and use multiple Julia processes for parallel solves. Creating multiple
+    SNOPT keeps one global Fortran session per process, so creating multiple
     [`SnoptWorkspace`](@ref) objects does not make independent solver sessions.
+    When [`initialize`](@ref) is called again, SNOPT.jl closes the previous
+    active workspace before creating the new one.
 
-    When [`initialize`](@ref) is called again, SNOPT.jl closes the previous active
-    workspace before creating the new one. Use the high-level [`snopt`](@ref)
-    entry point or an `initialize do` block unless you specifically need to
-    manage a workspace yourself.
+    Workspace creation and solves are serialized internally, so concurrent calls
+    from several threads are safe; they run one at a time rather than in
+    parallel. Use multiple Julia processes for genuinely parallel solves, and
+    prefer the high-level [`snopt`](@ref) entry point or an `initialize do`
+    block unless you specifically need to manage a workspace yourself.
 
 For larger problems, size the work arrays explicitly. A reasonable rule of thumb is
 
@@ -111,16 +113,17 @@ signatures SNOPT expects:
 | [`make_dummy_confun`](@ref) | `snOptB` | no-op constraints for unconstrained problems |
 | [`make_usrfun_c`](@ref) | `snOptC` | combined objective + constraint evaluation |
 | [`make_usrfun_a`](@ref) | `snOptA` | `eval_F(F, x)` and optional `eval_G(G, x)` |
-| [`make_snlog`](@ref) | `snOptB`/`snOptC` | a `snLog` hook delivering [`SnoptMajorLog`](@ref) events |
+| [`make_snlog`](@ref) | all three | a `snLog` hook delivering [`SnoptMajorLog`](@ref) events |
+| [`make_snstop`](@ref) | all three | a `snSTOP` hook delivering [`SnoptStopEvent`](@ref) events |
 
 The problem-evaluating builders ([`make_objfun`](@ref), [`make_confun`](@ref),
 [`make_usrfun_a`](@ref), [`make_usrfun_c`](@ref)) take a `callback` keyword for
-per-evaluation monitoring. Leave it at the default `nothing` to skip monitoring with
-no per-evaluation overhead, or pass [`snopt_no_progress`](@ref) as an explicit
-accept-everything callback — note this still builds an event object on each
-evaluation, so only `nothing` truly avoids the overhead. [`make_snlog`](@ref) instead
-takes its callback as a positional argument, and [`make_dummy_confun`](@ref) takes
-none.
+per-evaluation monitoring. Leave it at its default `nothing` to skip monitoring
+entirely, which also avoids building an event object on every evaluation.
+[`make_snlog`](@ref) and [`make_snstop`](@ref) take their callback as a
+positional argument instead, and [`make_dummy_confun`](@ref) takes none. The
+solvers build these two for you when you pass `snlog`/`snstop`; call the builders
+directly only when driving SNOPT's kernels yourself.
 
 A minimal `snOptB` solve assembled by hand:
 

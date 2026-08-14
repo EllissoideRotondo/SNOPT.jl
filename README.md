@@ -14,7 +14,8 @@ as the main Julia-facing entry point.
 `SNOPT.jl` is licensed under the [MIT License](LICENSE). The underlying solver is
 a closed-source commercial product for which you must
 [purchase a license](https://ccom.ucsd.edu/~optimizers/solvers/snopt/); its
-binaries are **not** distributed with this package.
+binaries are **not** distributed with this package. See
+[THIRD_PARTY_NOTICE.md](THIRD_PARTY_NOTICE.md).
 
 ## Installation
 
@@ -31,7 +32,8 @@ SNOPT.has_snopt()   # true once the library is found
 ```
 
 `SNOPTDIR` is the recommended setup on Linux and macOS. If it is unset, SNOPT.jl
-also searches the platform library-path variables:
+also searches the platform library-path variables, then the system loader's
+default paths:
 
 ```bash
 export LD_LIBRARY_PATH=/path/to/snopt:$LD_LIBRARY_PATH
@@ -41,15 +43,11 @@ export DYLD_LIBRARY_PATH=/path/to/snopt:$DYLD_LIBRARY_PATH   # macOS
 If the library is not found, the package still loads; `has_snopt()` returns
 `false` and solves raise an informative error.
 
-SNOPT solves are process-serial: run one solve at a time per Julia process, and
-use multiple Julia processes for parallel solves.
+SNOPT keeps one global Fortran session per process, so SNOPT.jl serializes
+solves internally: concurrent calls from several threads are safe, but they run
+one at a time. Use multiple Julia processes for genuinely parallel solves.
 
 ## Usage
-
-For most modeling workflows, the preferred interface will be
-[Optimization.jl](https://github.com/SciML/Optimization.jl). Support for that
-interface is currently in progress. `SNOPT.jl` itself provides a compact API for
-driving SNOPT directly with Julia callbacks.
 
 The main entry point is `snopt`, which solves a problem through SNOPT's `snOptB`
 interface. You supply an objective `f(x)`, its gradient `g!(g, x)`, and a starting
@@ -84,14 +82,19 @@ Key points of the low-level interface:
   `"Major print level" => 0`). Options can also be read from a specs file with
   `read_options`.
 - **Monitoring.** `snlog` receives a `SnoptMajorLog` per major iteration (counters,
-  objective, infeasibilities, the current point); the lower-level `callback` keyword
-  fires on each objective/constraint evaluation. Returning `false` from either
-  requests early termination.
+  objective, infeasibilities, the current point) and `snstop` receives a
+  `SnoptStopEvent` (the same, plus gradients, multipliers, and reduced costs) from
+  SNOPT's own termination hook; the lower-level `callback` keyword fires on each
+  objective/constraint evaluation. Returning `false` from any of them requests
+  early termination.
 
 ```julia
+deadline = time() + 30
+
 result = snopt(f, g!, x0;
     options = ["Major print level" => 1],
     snlog = event -> (println("major $(event.major_iter): f = $(event.objective)"); true),
+    snstop = event -> time() < deadline,
 )
 ```
 
@@ -99,7 +102,7 @@ Beyond `snopt`, the package exports the `snOptA`/`snOptB`/`snOptC` problem types
 (`SnoptA`, `SnoptB`/`SnoptProblem`, `SnoptC`), their in-place solvers (`snopta!`,
 `snoptb!`, `snoptc!`, `snopt!`), workspace management (`initialize`, `set_option!`,
 `snmemb`), and callback builders (`make_objfun`, `make_confun`, `make_usrfun_a`,
-`make_usrfun_c`, `make_snlog`). See the
+`make_usrfun_c`, `make_snlog`, `make_snstop`). See the
 [documentation](https://EllissoideRotondo.github.io/SNOPT.jl/stable) and the
 [`examples/`](examples) directory (`hs71.jl`, `unconstrained.jl`) for full worked
 problems.

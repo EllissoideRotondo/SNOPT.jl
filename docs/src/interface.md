@@ -74,9 +74,10 @@ options = [:major_print_level => 0, :minor_print_level => 0]
 ```
 
 Values may be integers, finite floats, strings, or symbols (`Bool` is rejected, to
-avoid silently coercing `true`/`false` to `1`/`0`). String/symbol values are
-appended to the keyword, so `"Hessian" => :limited` sends `"Hessian limited"`.
-Options can also be loaded from a SNOPT specs file with [`read_options`](@ref).
+avoid silently coercing `true`/`false` to `1`/`0`). String and symbol values are
+appended to the keyword, so `:hessian => :limited_memory` sends the SNOPT option
+`"Hessian limited memory"`. Options can also be loaded from a SNOPT specs file
+with [`read_options`](@ref).
 
 A few commonly used keywords:
 
@@ -86,34 +87,48 @@ A few commonly used keywords:
 | `"Major iterations limit"` | SQP iteration cap |
 | `"Major optimality tolerance"` | convergence tolerance |
 | `"Major feasibility tolerance"` | constraint tolerance |
-| `"Derivative option"` | SNOPT derivative-checking mode; the high-level API still requires `eval_grad` and, for constrained problems, `eval_jac` |
+| `"Hessian limited memory"` | limited-memory Hessian, for problems with many variables |
 
-The high-level [`snopt`](@ref) function always asks you for derivative callbacks.
-If you want SNOPT to finite-difference derivatives, use the low-level
-[`SnoptA`](@ref) path with [`make_usrfun_a`](@ref) and configure
-`"Derivative option"` there.
+The full option list is in the
+[SNOPT documentation](https://ccom.ucsd.edu/~optimizers/docs/snopt/options.html).
+
+[`snopt`](@ref) always requires your derivative callbacks. To have SNOPT
+finite-difference the derivatives instead, use the low-level [`SnoptA`](@ref) path
+with [`make_usrfun_a`](@ref) and set `"Derivative option"` to `0` there.
 
 ## Monitoring and early termination
 
-Two independent hooks are available:
+Three independent hooks are available:
 
 - **`snlog`** receives a [`SnoptMajorLog`](@ref) once per *major* iteration, with
   meaningful iteration counters and the current point, objective, infeasibilities,
   and multipliers. Use it for trace/progress output.
+- **`snstop`** receives a [`SnoptStopEvent`](@ref), also once per major iteration.
+  It carries everything `snlog` carries plus the gradients (`gobj`, `gcon`), the
+  row multipliers (`pi`), the reduced costs (`rc`), and the reduced gradient
+  (`rg`). This is SNOPT's own termination hook, so it is the natural place for
+  custom stopping criteria such as a wall-clock budget or a target objective.
 - **`callback`** fires on each objective/constraint *evaluation* (which may happen
   several times per major iteration). It receives a `NamedTuple` event with fields
   such as `kind` (`:objective` or `:constraint`), `mode`, `major_iter`,
   `minor_iter`, `x`, and `f` or `c`.
 
-Returning `false` from either hook requests SNOPT to stop; the resulting
+Returning `false` from any of them requests SNOPT to stop; the resulting
 [`SnoptResult`](@ref) then carries a `:User_Requested_Stop` status.
 
 ```julia
+deadline = time() + 30
+
 snopt(f, g!, x0;
     snlog = ev -> (println("major $(ev.major_iter): f = $(ev.objective)"); true),
+    snstop = ev -> time() < deadline,
     callback = ev -> ev.kind === :objective ? ev.f < 1e6 : true,
 )
 ```
+
+`snlog` and `snstop` route the solve through SNOPT's `snKerA`/`snKerB`/`snKerC`
+kernels, which is transparent to the caller; the hooks you do not pass keep
+SNOPT's own default routines.
 
 ## Output files and start mode
 
@@ -121,8 +136,24 @@ snopt(f, g!, x0;
 |-------------|----------|---------|
 | `printfile` | `""`     | path for SNOPT's detailed print output (empty = suppressed) |
 | `summfile`  | `""`     | path for SNOPT's summary output |
-| `start`     | `"Cold"` | `"Cold"`, `"Warm"`, or `"Hot"` start |
+| `start`     | `"Cold"` | `"Cold"`, or `"Warm"`/`"Hot"` together with `basis` |
+| `basis`     | `nothing`| a [`SnoptBasis`](@ref) from a previous result; required for a warm or hot start |
 | `name`      | `"Julia"`| ≤8-character problem name shown in SNOPT output |
+
+### Warm starts
+
+A warm start reuses the basis SNOPT ended the previous solve with, which saves
+iterations when you re-solve a slightly changed problem — a new parameter value,
+a nudged starting point:
+
+```julia
+first  = snopt(f, g!, x0)
+second = snopt(f, g!, x0; start = "Warm", basis = first.basis)
+```
+
+The basis records the problem dimensions it was built for, and `snopt` rejects
+one that does not match the problem at hand. Asking for a warm start without a
+basis is an error rather than a silent cold start.
 
 ## The result
 
@@ -140,6 +171,7 @@ result.iterations      # total minor iterations
 result.major_itns      # total major iterations
 result.run_time        # SNOPT-reported solve time (s)
 result.memory          # the SnoptMemory estimate used to size the workspace
+result.basis           # the final SnoptBasis, for a later warm start
 ```
 
 Map an inform code to its symbolic meaning through [`SNOPT_STATUS`](@ref).

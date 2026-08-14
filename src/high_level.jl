@@ -7,16 +7,22 @@ function snopt_bound_value(value)
     return value
 end
 
+function reject_nan(vector::Vector{Float64}, name::AbstractString)
+    any(isnan, vector) &&
+        throw(ArgumentError("$name must not contain NaN"))
+    return vector
+end
+
 function float_vector(values, name::AbstractString)
     values === nothing && throw(ArgumentError("$name must be provided"))
     values isa Number && throw(ArgumentError("$name must be a vector, not a scalar"))
-    return snopt_bound_value.(collect(values))
+    return reject_nan(snopt_bound_value.(collect(values)), name)
 end
 
 function bound_vector(values, n::Int, default::Float64, name::AbstractString)
     values === nothing && return fill(default, n)
-    values isa Number && return fill(snopt_bound_value(values), n)
-    vector = snopt_bound_value.(collect(values))
+    values isa Number && return reject_nan(fill(snopt_bound_value(values), n), name)
+    vector = reject_nan(snopt_bound_value.(collect(values)), name)
     length(vector) == n ||
         throw(ArgumentError("$name must have length $n; got $(length(vector))"))
     return vector
@@ -84,17 +90,22 @@ function snopt_result(prob::SnoptB, memory::SnoptMemory)
     status = Int(prob.status)
     status_symbol = get(SNOPT_STATUS, status, :Unknown_Status)
     lambda_length = prob.n + prob.nc
+    basis = SnoptBasis(copy(prob.hs), prob.nS, prob.n, prob.m_eff)
     return SnoptResult(status, status_symbol, prob.obj_val, copy(prob.x[1:prob.n]),
                        copy(prob.lambda[1:lambda_length]),
                        prob.ws.num_inf, prob.ws.sum_inf,
                        prob.ws.iterations, prob.ws.major_itns, prob.ws.run_time,
-                       memory)
+                       memory, basis)
 end
 
-function preflight_callbacks!(eval_obj::Function, eval_grad::Function,
+function preflight_callbacks!(eval_obj, eval_grad,
                               eval_con, eval_jac, x::Vector{Float64},
+                              xlow::Vector{Float64}, xupp::Vector{Float64},
                               nc::Int, J::SparseMatrixCSC, callback)
-    xcheck = copy(x)
+    # SNOPT projects the starting point into the variable bounds before its
+    # first evaluation; do the same here so a domain-limited objective is not
+    # probed at an out-of-bounds x0 that the solver itself would never visit.
+    xcheck = clamp.(x, xlow, xupp)
     f = eval_obj(xcheck)
     if callback !== nothing
         event = (kind = :objective, mode = 0, major_iter = 0, minor_iter = 0,
@@ -132,7 +143,8 @@ function preflight_stop_result(stop, n::Int, nc::Int, memory::SnoptMemory)
         0,
         0,
         0.0,
-        memory
+        memory,
+        SnoptBasis(zeros(Int32, n + max(nc, 1)), 0, n, max(nc, 1))
     )
 end
 
@@ -161,9 +173,22 @@ Keyword arguments:
     events. Use this for evaluation-level monitoring or early termination.
   * `snlog`: optional callback receiving `SnoptMajorLog` major-iteration events.
     Use this for trace/progress output with meaningful iteration counters.
+  * `snstop`: optional callback receiving `SnoptStopEvent` major-iteration events.
+    Return `false` from it to stop SNOPT; the solve then reports inform code 74
+    (`:User_Requested_Stop`). Use this for custom termination criteria.
+  * `start`: SNOPT start mode, `"Cold"` (default), `"Warm"`, or `"Hot"`. A warm
+    or hot start also requires `basis`.
+  * `basis`: a [`SnoptBasis`](@ref) from a previous result, reused as the
+    starting basis. Only valid together with `start = "Warm"` or `"Hot"`.
+  * `printfile`, `summfile`: paths for SNOPT's print and summary files; empty
+    strings (the default) suppress them.
+  * `name`: the ≤8-character problem name SNOPT prints.
+
+`x0` must be finite, and bounds may not contain NaN (`±Inf` is mapped to
+SNOPT's infinite-bound value).
 
 """
-function snopt(eval_obj::Function, eval_grad::Function,
+function snopt(eval_obj, eval_grad,
                x0::AbstractVector{<:Real};
                lb=nothing, ub=nothing,
                eval_con=nothing, eval_jac=nothing,
@@ -172,13 +197,17 @@ function snopt(eval_obj::Function, eval_grad::Function,
                options=nothing,
                callback=nothing,
                snlog=nothing,
+               snstop=nothing,
                printfile::String = "",
                summfile::String = "",
                start::String = "Cold",
+               basis=nothing,
                name::String = "Julia")
     x0_vector = Float64.(collect(x0))
     n = length(x0_vector)
     n > 0 || throw(ArgumentError("x0 must contain at least one variable"))
+    all(isfinite, x0_vector) ||
+        throw(ArgumentError("x0 must contain only finite values"))
     xlow = bound_vector(lb, n, -SNOPT_INF, "lb")
     xupp = bound_vector(ub, n, SNOPT_INF, "ub")
     nc, lcon_vector, ucon_vector =
@@ -190,11 +219,55 @@ function snopt(eval_obj::Function, eval_grad::Function,
     nnCon = nc
     nnJac = nc > 0 ? n : 0
     nnObj = n
+    # Hold the SNOPT lock across the whole solve, not merely across the
+    # individual calls that take it themselves. The workspace-sizing estimate,
+    # the workspace, its options, and the solve are one transaction: releasing
+    # the lock between them would let another task's `initialize` close this
+    # workspace mid-flight.
+    hs_start, nS_start = prepare_start_basis(basis, start, n, m_eff)
+    return lock(SNOPT_LOCK) do
+        snopt_locked(eval_obj, eval_grad, x0_vector, xlow, xupp, nc,
+                     lcon_vector, ucon_vector, eval_con, eval_jac, J32, m_eff,
+                     neJ, negCon, nnCon, nnObj, nnJac, options, callback, snlog,
+                     snstop, printfile, summfile, start, name, n, hs_start,
+                     nS_start)
+    end
+end
+
+# A warm or hot start is only meaningful with the basis SNOPT ended a previous
+# solve with; without it SNOPT would restart from a zeroed basis, which is a
+# cold start wearing a different name.
+function prepare_start_basis(basis, start::AbstractString, n::Int, m_eff::Int)
+    if lowercase(strip(start)) == "cold"
+        basis === nothing ||
+            throw(ArgumentError("basis is only meaningful with start = \"Warm\" or \"Hot\""))
+        return zeros(Int32, n + m_eff), 0
+    end
+    basis === nothing &&
+        throw(ArgumentError("start = $(repr(start)) requires `basis` from a previous SnoptResult"))
+    basis isa SnoptBasis ||
+        throw(ArgumentError("basis must be a SnoptBasis; got $(typeof(basis))"))
+    basis.n == n ||
+        throw(ArgumentError("basis was built for n = $(basis.n); this problem has n = $n"))
+    basis.m == m_eff ||
+        throw(ArgumentError("basis was built for m = $(basis.m); this problem has m = $m_eff"))
+    length(basis.hs) == n + m_eff ||
+        throw(ArgumentError("basis hs must have length n + m = $(n + m_eff); " *
+                            "got $(length(basis.hs))"))
+    return copy(basis.hs), basis.nS
+end
+
+function snopt_locked(eval_obj, eval_grad, x0_vector, xlow, xupp, nc,
+                      lcon_vector, ucon_vector, eval_con, eval_jac, J32, m_eff,
+                      neJ, negCon, nnCon, nnObj, nnJac, options, callback, snlog,
+                      snstop, printfile, summfile, start, name, n, hs_start,
+                      nS_start)
     memory = check_memory_estimate(
         snmemb(m_eff, n, neJ, negCon, nnCon, nnObj, nnJac;
                options, printfile, summfile))
     preflight_stop = preflight_callbacks!(
-        eval_obj, eval_grad, eval_con, eval_jac, x0_vector, nc, J32, callback)
+        eval_obj, eval_grad, eval_con, eval_jac, x0_vector, xlow, xupp,
+        nc, J32, callback)
     preflight_stop !== nothing &&
         return preflight_stop_result(preflight_stop, n, nc, memory)
     ws = initialize(printfile, summfile, memory.miniw, memory.minrw)
@@ -206,10 +279,9 @@ function snopt(eval_obj::Function, eval_grad::Function,
         x = [x0_vector; zeros(m_eff)]
         bl = [xlow; nc > 0 ? lcon_vector : [-SNOPT_INF]]
         bu = [xupp; nc > 0 ? ucon_vector : [SNOPT_INF]]
-        hs = zeros(Int32, n + m_eff)
-        prob = SnoptB(ws, n, nc, m_eff, n, x, bl, bu, hs, J32,
-                      0.0, 0, Float64[], objfun, confun)
-        snoptb!(prob; start, name, snlog)
+        prob = SnoptB(ws, n, nc, m_eff, n, x, bl, bu, hs_start, J32,
+                      0.0, 0, Float64[], objfun, confun, nS_start)
+        snoptb!(prob; start, name, snlog, snstop)
         return snopt_result(prob, memory)
     finally
         free!(ws)

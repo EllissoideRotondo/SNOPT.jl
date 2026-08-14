@@ -48,16 +48,36 @@ function require_dimension(condition::Bool, message::AbstractString)
     return nothing
 end
 
+# A solve routes through snKerA/snKerB/snKerC as soon as either kernel hook is
+# requested; the hook that was *not* requested is passed as a null pointer, which
+# the snopt-interface wrapper replaces with SNOPT's own default routine.
+make_snlog_or_nothing(snlog) = snlog === nothing ? nothing : make_snlog(snlog)
+make_snstop_or_nothing(snstop) = snstop === nothing ? nothing : make_snstop(snstop)
+
+kernel_callback_pointer(callback, ptr::Base.RefValue{Ptr{Cvoid}}) =
+    callback === nothing ? Ptr{Cvoid}(C_NULL) : snopt_callback_pointer(ptr)
+
 """
-    snopta!(prob::SnoptA; start="Cold", name="Julia") -> Int
+    snopta!(prob::SnoptA; start="Cold", name="Julia", snlog=nothing,
+            snstop=nothing) -> Int
 
 Solve a [`SnoptA`](@ref) problem in place through SNOPT's `snOptA` interface and
 return the SNOPT inform code. The final point is written into `prob.x`, multipliers
 into `prob.xmul`/`prob.Fmul`, and the row values into `prob.F`. If the problem was
 built without a derivative function, SNOPT must be configured for finite-difference
-gradients (`set_option!(ws, "Derivative option", 0)`).
+gradients (`set_option!(ws, "Derivative option", 0)`). Pass `snlog` to receive a
+[`SnoptMajorLog`](@ref) at each major iteration, or `snstop` to receive a
+[`SnoptStopEvent`](@ref) and control early termination; either one routes the
+solve through SNOPT's `snKerA` kernel.
 """
-function snopta!(prob::SnoptA; start::String = "Cold", name::String = "Julia")
+function snopta!(prob::SnoptA; start::String = "Cold", name::String = "Julia",
+                 snlog=nothing, snstop=nothing)
+    return lock(SNOPT_LOCK) do
+        snopta_locked!(prob, start, name, snlog, snstop)
+    end
+end
+
+function snopta_locked!(prob::SnoptA, start::String, name::String, snlog, snstop)
     require_open_workspace(prob.ws, "snopta!")
     require_dimension(
         prob.n == length(prob.x) == length(prob.xlow) == length(prob.xupp),
@@ -87,40 +107,90 @@ function snopta!(prob::SnoptA; start::String = "Cold", name::String = "Julia")
     sInf   = [0.0]
     miniw  = Int32[0]
     minrw  = Int32[0]
-    active_callbacks = ActiveSnoptACallbacks(usrfun)
-    with_active_snopt_callbacks(prob.ws, active_callbacks) do
-        reset_callback_exception!(usrfun)
-        GC.@preserve usrfun begin
-            ccall((:f_snopta, libsnopt7), Cvoid,
-                  (Cint, Cstring,
-                   Cint, Cint, Cdouble, Cint,
-                   Ptr{Cvoid},
-                   Ptr{Cint}, Ptr{Cint}, Cint, Ptr{Cdouble},
-                   Ptr{Cint}, Ptr{Cint}, Cint,
-                   Ptr{Cdouble}, Ptr{Cdouble},
-                   Ptr{Cdouble}, Ptr{Cdouble},
-                   Ptr{Cdouble}, Ptr{Cint}, Ptr{Cdouble},
-                   Ptr{Cdouble}, Ptr{Cint}, Ptr{Cdouble},
-                   Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble},
-                   Ptr{Cint}, Ptr{Cint},
-                   Ptr{Cint}, Cint, Ptr{Cdouble}, Cint,
-                   Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
-                  start_mode_code(start), name,
-                  prob.nf, prob.n, prob.objadd, prob.objrow,
-                  usr_callback,
-                  prob.iAfun, prob.jAvar, length(prob.A), prob.A,
-                  prob.iGfun, prob.jGvar, length(prob.iGfun),
-                  prob.xlow, prob.xupp,
-                  prob.flow, prob.fupp,
-                  prob.x, prob.xstate, prob.xmul,
-                  prob.F, prob.Fstate, prob.Fmul,
-                  status, nS, nInf, sInf,
-                  miniw, minrw,
-                  prob.ws.iu, prob.ws.leniu, prob.ws.ru, prob.ws.lenru,
-                  prob.ws.iw, prob.ws.leniw, prob.ws.rw, prob.ws.lenrw)
+    if snlog === nothing && snstop === nothing
+        active_callbacks = ActiveSnoptACallbacks(usrfun)
+        with_active_snopt_callbacks(prob.ws, active_callbacks) do
+            reset_callback_exception!(usrfun)
+            GC.@preserve usrfun begin
+                ccall((:f_snopta, libsnopt7), Cvoid,
+                      (Cint, Cstring,
+                       Cint, Cint, Cdouble, Cint,
+                       Ptr{Cvoid},
+                       Ptr{Cint}, Ptr{Cint}, Cint, Ptr{Cdouble},
+                       Ptr{Cint}, Ptr{Cint}, Cint,
+                       Ptr{Cdouble}, Ptr{Cdouble},
+                       Ptr{Cdouble}, Ptr{Cdouble},
+                       Ptr{Cdouble}, Ptr{Cint}, Ptr{Cdouble},
+                       Ptr{Cdouble}, Ptr{Cint}, Ptr{Cdouble},
+                       Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble},
+                       Ptr{Cint}, Ptr{Cint},
+                       Ptr{Cint}, Cint, Ptr{Cdouble}, Cint,
+                       Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
+                      start_mode_code_a(start), name,
+                      prob.nf, prob.n, prob.objadd, prob.objrow,
+                      usr_callback,
+                      prob.iAfun, prob.jAvar, length(prob.A), prob.A,
+                      prob.iGfun, prob.jGvar, length(prob.iGfun),
+                      prob.xlow, prob.xupp,
+                      prob.flow, prob.fupp,
+                      prob.x, prob.xstate, prob.xmul,
+                      prob.F, prob.Fstate, prob.Fmul,
+                      status, nS, nInf, sInf,
+                      miniw, minrw,
+                      prob.ws.iu, prob.ws.leniu, prob.ws.ru, prob.ws.lenru,
+                      prob.ws.iw, prob.ws.leniw, prob.ws.rw, prob.ws.lenrw)
+            end
+            rethrow_callback_exception!(usrfun)
+            rethrow_active_callback_exception!(active_callbacks)
         end
-        rethrow_callback_exception!(usrfun)
-        rethrow_active_callback_exception!(active_callbacks)
+    else
+        # f_snkera is f_snopta with the four kernel callback pointers
+        # (snLog, snLog2, sqLog, snSTOP) inserted after the user function,
+        # exactly as f_snkerb relates to f_snoptb. A null pointer makes the
+        # wrapper fall back to SNOPT's own routine for that hook, so the
+        # snLog2/sqLog printing hooks stay on SNOPT's defaults.
+        snlog_fn = make_snlog_or_nothing(snlog)
+        snstop_fn = make_snstop_or_nothing(snstop)
+        snlog_callback = kernel_callback_pointer(snlog_fn, SNOPT_SNLOG_CALLBACK_PTR)
+        snstop_callback = kernel_callback_pointer(snstop_fn, SNOPT_SNSTOP_CALLBACK_PTR)
+        null_callback = Ptr{Cvoid}(C_NULL)
+        active_callbacks = ActiveSnoptACallbacks(usrfun; snlog=snlog_fn, snstop=snstop_fn)
+        with_active_snopt_callbacks(prob.ws, active_callbacks) do
+            reset_callback_exception!(usrfun, snlog_fn, snstop_fn)
+            GC.@preserve usrfun snlog_fn snstop_fn begin
+                ccall((:f_snkera, libsnopt7), Cvoid,
+                      (Cint, Cstring,
+                       Cint, Cint, Cdouble, Cint,
+                       Ptr{Cvoid},
+                       Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid},
+                       Ptr{Cint}, Ptr{Cint}, Cint, Ptr{Cdouble},
+                       Ptr{Cint}, Ptr{Cint}, Cint,
+                       Ptr{Cdouble}, Ptr{Cdouble},
+                       Ptr{Cdouble}, Ptr{Cdouble},
+                       Ptr{Cdouble}, Ptr{Cint}, Ptr{Cdouble},
+                       Ptr{Cdouble}, Ptr{Cint}, Ptr{Cdouble},
+                       Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble},
+                       Ptr{Cint}, Ptr{Cint},
+                       Ptr{Cint}, Cint, Ptr{Cdouble}, Cint,
+                       Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
+                      start_mode_code_a(start), name,
+                      prob.nf, prob.n, prob.objadd, prob.objrow,
+                      usr_callback,
+                      snlog_callback, null_callback, null_callback, snstop_callback,
+                      prob.iAfun, prob.jAvar, length(prob.A), prob.A,
+                      prob.iGfun, prob.jGvar, length(prob.iGfun),
+                      prob.xlow, prob.xupp,
+                      prob.flow, prob.fupp,
+                      prob.x, prob.xstate, prob.xmul,
+                      prob.F, prob.Fstate, prob.Fmul,
+                      status, nS, nInf, sInf,
+                      miniw, minrw,
+                      prob.ws.iu, prob.ws.leniu, prob.ws.ru, prob.ws.lenru,
+                      prob.ws.iw, prob.ws.leniw, prob.ws.rw, prob.ws.lenrw)
+            end
+            rethrow_callback_exception!(usrfun, snlog_fn, snstop_fn)
+            rethrow_active_callback_exception!(active_callbacks)
+        end
     end
     prob.status = Int(status[1])
     prob.nS = Int(nS[1])
@@ -141,10 +211,23 @@ end
 function snoptb!(prob::SnoptWorkspace, start::String, name::String,
                  m::Int, n::Int, nnCon::Int, nnObj::Int, nnJac::Int,
                  fObj::Float64, iObj::Int,
-                 confun::Function, objfun::Function,
+                 confun, objfun,
                  J::SparseMatrixCSC, bl::Vector{Float64}, bu::Vector{Float64},
                  hs::Vector{Int32}, x::Vector{Float64};
-                 snlog=nothing)
+                 snlog=nothing, snstop=nothing, nS::Int = 0)
+    return lock(SNOPT_LOCK) do
+        snoptb_locked!(prob, start, name, m, n, nnCon, nnObj, nnJac, fObj, iObj,
+                       confun, objfun, J, bl, bu, hs, x, snlog, snstop, nS)
+    end
+end
+
+function snoptb_locked!(prob::SnoptWorkspace, start::String, name::String,
+                        m::Int, n::Int, nnCon::Int, nnObj::Int, nnJac::Int,
+                        fObj::Float64, iObj::Int,
+                        confun, objfun,
+                        J::SparseMatrixCSC, bl::Vector{Float64}, bu::Vector{Float64},
+                        hs::Vector{Int32}, x::Vector{Float64}, snlog, snstop,
+                        nS_in::Int)
     require_open_workspace(prob, "snoptb!")
     total = n + m
     require_dimension(
@@ -153,6 +236,13 @@ function snoptb!(prob::SnoptWorkspace, start::String, name::String,
     require_dimension(
         total == length(hs),
         "snOptB basis-status array must have length n + m = $total")
+    require_dimension(
+        size(J) == (m, n),
+        "snOptB Jacobian must have size (m, n) = ($m, $n); got $(size(J))")
+    require_dimension(
+        length(J.colptr) == n + 1,
+        "snOptB Jacobian column pointer must have length n + 1 = $(n + 1); " *
+        "got $(length(J.colptr))")
     prob.iu = Int32[0]
     prob.ru = [0.0]
     prob.x      = copy(x)
@@ -165,14 +255,14 @@ function snoptb!(prob::SnoptWorkspace, start::String, name::String,
     locJ = convert(Array{Cint}, J.colptr)
     neJ  = length(valJ)
     status  = Int32[0]
-    nS      = Int32[0]
+    nS      = Int32[nS_in]
     nInf    = Int32[0]
     sInf    = [0.0]
     obj_val = [0.0]
     miniw   = Int32[0]
     minrw   = Int32[0]
     start_code = start_mode_code(start)
-    if snlog === nothing
+    if snlog === nothing && snstop === nothing
         active_callbacks = ActiveSnoptBCallbacks(confun, objfun)
         with_active_snopt_callbacks(prob, active_callbacks) do
             reset_callback_exception!(confun, objfun)
@@ -203,13 +293,16 @@ function snoptb!(prob::SnoptWorkspace, start::String, name::String,
             rethrow_active_callback_exception!(active_callbacks)
         end
     else
-        snlog_fn = make_snlog(snlog)
-        snlog_callback = snopt_callback_pointer(SNOPT_SNLOG_CALLBACK_PTR)
+        snlog_fn = make_snlog_or_nothing(snlog)
+        snstop_fn = make_snstop_or_nothing(snstop)
+        snlog_callback = kernel_callback_pointer(snlog_fn, SNOPT_SNLOG_CALLBACK_PTR)
+        snstop_callback = kernel_callback_pointer(snstop_fn, SNOPT_SNSTOP_CALLBACK_PTR)
         null_callback = Ptr{Cvoid}(C_NULL)
-        active_callbacks = ActiveSnoptBCallbacks(confun, objfun; snlog=snlog_fn)
+        active_callbacks = ActiveSnoptBCallbacks(confun, objfun;
+                                                 snlog=snlog_fn, snstop=snstop_fn)
         with_active_snopt_callbacks(prob, active_callbacks) do
-            reset_callback_exception!(confun, objfun, snlog_fn)
-            GC.@preserve confun objfun snlog_fn begin
+            reset_callback_exception!(confun, objfun, snlog_fn, snstop_fn)
+            GC.@preserve confun objfun snlog_fn snstop_fn begin
                 ccall((:f_snkerb, libsnopt7), Cvoid,
                       (Cint, Cstring,
                        Cint, Cint, Cint, Cint, Cint, Cint,
@@ -226,7 +319,7 @@ function snoptb!(prob::SnoptWorkspace, start::String, name::String,
                       start_code, name, m, n, neJ, nnCon, nnObj, nnJac,
                       iObj, fObj,
                       con_callback, obj_callback,
-                      snlog_callback, null_callback, null_callback, null_callback,
+                      snlog_callback, null_callback, null_callback, snstop_callback,
                       valJ, indJ, locJ,
                       bl, bu, hs, prob.x, pi_, prob.lambda,
                       status, nS, nInf, sInf, obj_val,
@@ -234,12 +327,13 @@ function snoptb!(prob::SnoptWorkspace, start::String, name::String,
                       prob.iu, prob.leniu, prob.ru, prob.lenru,
                       prob.iw, prob.leniw, prob.rw, prob.lenrw)
             end
-            rethrow_callback_exception!(confun, objfun, snlog_fn)
+            rethrow_callback_exception!(confun, objfun, snlog_fn, snstop_fn)
             rethrow_active_callback_exception!(active_callbacks)
         end
     end
     prob.status  = status[1]
     prob.obj_val = obj_val[1]
+    prob.nS      = Int(nS[1])
     prob.num_inf = nInf[1]
     prob.sum_inf = sInf[1]
     prob.iterations = workspace_value(prob.iw, IW_MINOR_ITNS)
@@ -250,15 +344,23 @@ function snoptb!(prob::SnoptWorkspace, start::String, name::String,
 end
 
 """
-    snoptc!(prob::SnoptC; start="Cold", name="Julia", snlog=nothing) -> Int
+    snoptc!(prob::SnoptC; start="Cold", name="Julia", snlog=nothing,
+            snstop=nothing) -> Int
 
 Solve a [`SnoptC`](@ref) problem in place through SNOPT's `snOptC` interface and
 return the SNOPT inform code. The final point, objective, and multipliers are written
 back into `prob`. Pass `snlog` to receive a [`SnoptMajorLog`](@ref) at each major
-iteration (routing the solve through SNOPT's `snKerC` kernel).
+iteration, or `snstop` to receive a [`SnoptStopEvent`](@ref) and control early
+termination; either one routes the solve through SNOPT's `snKerC` kernel.
 """
 function snoptc!(prob::SnoptC; start::String = "Cold", name::String = "Julia",
-                 snlog=nothing)
+                 snlog=nothing, snstop=nothing)
+    return lock(SNOPT_LOCK) do
+        snoptc_locked!(prob, start, name, snlog, snstop)
+    end
+end
+
+function snoptc_locked!(prob::SnoptC, start::String, name::String, snlog, snstop)
     require_open_workspace(prob.ws, "snoptc!")
     total = prob.n + prob.m_eff
     require_dimension(
@@ -267,6 +369,14 @@ function snoptc!(prob::SnoptC; start::String = "Cold", name::String = "Julia",
     require_dimension(
         total == length(prob.hs),
         "SnoptC basis-status array must have length n + m_eff = $total")
+    require_dimension(
+        size(prob.J) == (prob.m_eff, prob.n),
+        "SnoptC Jacobian must have size (m_eff, n) = ($(prob.m_eff), $(prob.n)); " *
+        "got $(size(prob.J))")
+    require_dimension(
+        length(prob.J.colptr) == prob.n + 1,
+        "SnoptC Jacobian column pointer must have length n + 1 = $(prob.n + 1); " *
+        "got $(length(prob.J.colptr))")
     prob.ws.iu = Int32[0]
     prob.ws.ru = [0.0]
     prob.ws.x      = copy(prob.x)
@@ -279,7 +389,7 @@ function snoptc!(prob::SnoptC; start::String = "Cold", name::String = "Julia",
     locJ = convert(Array{Cint}, prob.J.colptr)
     neJ  = length(valJ)
     status  = Int32[0]
-    nS      = Int32[0]
+    nS      = Int32[prob.nS]
     nInf    = Int32[0]
     sInf    = [0.0]
     obj_val = [0.0]
@@ -288,7 +398,7 @@ function snoptc!(prob::SnoptC; start::String = "Cold", name::String = "Julia",
     nnCon = prob.nc
     nnJac = prob.nc > 0 ? prob.n : 0
     start_code = start_mode_code(start)
-    if snlog === nothing
+    if snlog === nothing && snstop === nothing
         active_callbacks = ActiveSnoptCCallbacks(usrfun)
         with_active_snopt_callbacks(prob.ws, active_callbacks) do
             reset_callback_exception!(usrfun)
@@ -320,13 +430,15 @@ function snoptc!(prob::SnoptC; start::String = "Cold", name::String = "Julia",
             rethrow_active_callback_exception!(active_callbacks)
         end
     else
-        snlog_fn = make_snlog(snlog)
-        snlog_callback = snopt_callback_pointer(SNOPT_SNLOG_CALLBACK_PTR)
+        snlog_fn = make_snlog_or_nothing(snlog)
+        snstop_fn = make_snstop_or_nothing(snstop)
+        snlog_callback = kernel_callback_pointer(snlog_fn, SNOPT_SNLOG_CALLBACK_PTR)
+        snstop_callback = kernel_callback_pointer(snstop_fn, SNOPT_SNSTOP_CALLBACK_PTR)
         null_callback = Ptr{Cvoid}(C_NULL)
-        active_callbacks = ActiveSnoptCCallbacks(usrfun; snlog=snlog_fn)
+        active_callbacks = ActiveSnoptCCallbacks(usrfun; snlog=snlog_fn, snstop=snstop_fn)
         with_active_snopt_callbacks(prob.ws, active_callbacks) do
-            reset_callback_exception!(usrfun, snlog_fn)
-            GC.@preserve usrfun snlog_fn begin
+            reset_callback_exception!(usrfun, snlog_fn, snstop_fn)
+            GC.@preserve usrfun snlog_fn snstop_fn begin
                 ccall((:f_snkerc, libsnopt7), Cvoid,
                       (Cint, Cstring,
                        Cint, Cint, Cint, Cint, Cint, Cint,
@@ -344,7 +456,7 @@ function snoptc!(prob::SnoptC; start::String = "Cold", name::String = "Julia",
                       prob.m_eff, prob.n, neJ, nnCon, prob.nnobj, nnJac,
                       0, 0.0,
                       usr_callback,
-                      snlog_callback, null_callback, null_callback, null_callback,
+                      snlog_callback, null_callback, null_callback, snstop_callback,
                       valJ, indJ, locJ,
                       prob.bl, prob.bu, prob.hs, prob.ws.x, pi_, prob.ws.lambda,
                       status, nS, nInf, sInf, obj_val,
@@ -352,13 +464,15 @@ function snoptc!(prob::SnoptC; start::String = "Cold", name::String = "Julia",
                       prob.ws.iu, prob.ws.leniu, prob.ws.ru, prob.ws.lenru,
                       prob.ws.iw, prob.ws.leniw, prob.ws.rw, prob.ws.lenrw)
             end
-            rethrow_callback_exception!(usrfun, snlog_fn)
+            rethrow_callback_exception!(usrfun, snlog_fn, snstop_fn)
             rethrow_active_callback_exception!(active_callbacks)
         end
     end
     prob.status  = Int(status[1])
     prob.obj_val = obj_val[1]
+    prob.nS      = Int(nS[1])
     prob.lambda  = prob.ws.lambda
+    prob.ws.nS     = prob.nS
     prob.ws.status = prob.status
     prob.ws.obj_val = prob.obj_val
     prob.ws.num_inf = Int(nInf[1])

@@ -1,6 +1,6 @@
 name = "SNOPT"
 uuid = "09fd284b-e7b0-4fba-b41f-c39527135ddd"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["Alex Pascarella <alex.pascarella@proton.me>"]
 
 [deps]
@@ -8,13 +8,15 @@ Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
 [compat]
+Aqua = "0.8"
 Libdl = "1"
 SparseArrays = "1"
 Test = "1"
-julia = "1.9"
+julia = "1.10"
 
 [extras]
+Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test"]
+test = ["Aqua", "Test"]

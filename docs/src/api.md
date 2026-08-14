@@ -12,7 +12,9 @@ CurrentModule = SNOPT
 ```@docs
 snopt
 SnoptResult
+SnoptBasis
 SnoptMajorLog
+SnoptStopEvent
 SnoptMemory
 SNOPT_STATUS
 ```
@@ -40,6 +42,7 @@ snopta!
 
 ```@docs
 initialize
+SNOPT.SnoptWorkspace
 set_option!
 read_options
 specs_status_message
@@ -55,6 +58,7 @@ make_dummy_confun
 make_usrfun_c
 make_usrfun_a
 make_snlog
+make_snstop
 snopt_no_progress
 ```
 
@@ -65,5 +69,4 @@ These helpers are not exported; access them as `SNOPT.has_snopt`, etc.
 ```@docs
 SNOPT.has_snopt
 SNOPT.find_snopt_lib
-SNOPT.SnoptWorkspace
 ```

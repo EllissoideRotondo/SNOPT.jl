@@ -1,3 +1,5 @@
+# snopt-interface's f_snoptb/f_snoptc/f_snkerb/f_snkerc map their integer start
+# argument as 1 => 'Warm', 2 => 'Hot', anything else => 'Cold'.
 function start_mode_code(start::AbstractString)::Cint
     key = lowercase(strip(start))
     key == "cold" && return Cint(0)
@@ -6,34 +8,48 @@ function start_mode_code(start::AbstractString)::Cint
     throw(ArgumentError("SNOPT start mode must be Cold, Warm, or Hot; got $(repr(start))"))
 end
 
+# f_snopta forwards its integer start argument unchanged to snOptA, which uses
+# 0 = Cold, 1 = Basis file, 2 = Warm, 3 = Hot — a different convention from the
+# snOptB/snOptC wrappers above.
+function start_mode_code_a(start::AbstractString)::Cint
+    key = lowercase(strip(start))
+    key == "cold" && return Cint(0)
+    key == "warm" && return Cint(2)
+    key == "hot"  && return Cint(3)
+    throw(ArgumentError("SNOPT start mode must be Cold, Warm, or Hot; got $(repr(start))"))
+end
+
 """
-    snopt!(prob::AbstractSnoptProblem; start="Cold", name="Julia", snlog=nothing) -> Int
+    snopt!(prob::AbstractSnoptProblem; start="Cold", name="Julia", snlog=nothing,
+           snstop=nothing) -> Int
 
 Solve a low-level problem in place, dispatching on its type to [`snopta!`](@ref),
 [`snoptb!`](@ref), or [`snoptc!`](@ref). The problem's result fields (`status`,
 `obj_val`, multipliers, and final `x`) are overwritten and the SNOPT inform code is
 returned. `start` selects the SNOPT start mode (`"Cold"`, `"Warm"`, or `"Hot"`),
-`name` is the ≤8-character problem name SNOPT prints, and `snlog` is an optional
-major-iteration callback. `snlog` is honored by the `SnoptB` and `SnoptC` methods;
-on the `SnoptA` method it is accepted for signature uniformity but ignored, since
-`snOptA` has no major-iteration log hook.
+`name` is the ≤8-character problem name SNOPT prints, `snlog` is an optional
+major-iteration log callback, and `snstop` is an optional major-iteration
+termination callback; both are honored by all three methods, and supplying either
+routes the solve through SNOPT's matching `snKerA`/`snKerB`/`snKerC` kernel.
 """
 function snopt!(prob::SnoptB; start::String = "Cold", name::String = "Julia",
-                snlog=nothing)
-    return snoptb!(prob; start, name, snlog)
+                snlog=nothing, snstop=nothing)
+    return snoptb!(prob; start, name, snlog, snstop)
 end
 
 """
-    snoptb!(prob::SnoptB; start="Cold", name="Julia", snlog=nothing) -> Int
+    snoptb!(prob::SnoptB; start="Cold", name="Julia", snlog=nothing,
+            snstop=nothing) -> Int
 
 Solve a [`SnoptB`](@ref) problem in place through SNOPT's `snOptB` interface and
 return the SNOPT inform code. The final point, objective, and multipliers are written
 back into `prob`. Pass `snlog` to receive a [`SnoptMajorLog`](@ref) at each major
-iteration (this routes the solve through SNOPT's `snKerB` reverse-communication
-kernel). Also reachable through the alias [`snopt!`](@ref).
+iteration, or `snstop` to receive a [`SnoptStopEvent`](@ref) and control early
+termination; either one routes the solve through SNOPT's `snKerB`
+reverse-communication kernel. Also reachable through the alias [`snopt!`](@ref).
 """
 function snoptb!(prob::SnoptB; start::String = "Cold", name::String = "Julia",
-                 snlog=nothing)
+                 snlog=nothing, snstop=nothing)
     nc    = prob.nc
     nnCon = nc
     nnJac = nc > 0 ? prob.n : 0
@@ -42,21 +58,20 @@ function snoptb!(prob::SnoptB; start::String = "Cold", name::String = "Julia",
                      0.0, 0,
                      prob.confun, prob.objfun,
                      prob.J, prob.bl, prob.bu, prob.hs, prob.x;
-                     snlog)
+                     snlog, snstop, nS = prob.nS)
     prob.obj_val = prob.ws.obj_val
     prob.status  = inform
+    prob.nS      = prob.ws.nS
     prob.lambda  = prob.ws.lambda
     return inform
 end
 
 function snopt!(prob::SnoptA; start::String = "Cold", name::String = "Julia",
-                snlog=nothing)
-    # snOptA has no major-iteration log hook; snlog is accepted for signature
-    # uniformity with the SnoptB/SnoptC methods and ignored.
-    return snopta!(prob; start, name)
+                snlog=nothing, snstop=nothing)
+    return snopta!(prob; start, name, snlog, snstop)
 end
 
 function snopt!(prob::SnoptC; start::String = "Cold", name::String = "Julia",
-                snlog=nothing)
-    return snoptc!(prob; start, name, snlog)
+                snlog=nothing, snstop=nothing)
+    return snoptc!(prob; start, name, snlog, snstop)
 end

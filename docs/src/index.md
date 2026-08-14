@@ -28,8 +28,9 @@ Julia-facing entry point.
     See [Installation](@ref).
 
 !!! note "Concurrency"
-    SNOPT solves are process-serial: run one solve at a time per Julia process,
-    and use multiple Julia processes for parallel solves.
+    SNOPT keeps one global Fortran session per process, so SNOPT.jl serializes
+    solves internally: concurrent calls from several threads are safe, but they
+    run one at a time. Use multiple Julia processes for parallel solves.
 
 ## Quick start
 
@@ -55,12 +56,4 @@ result.objective       # ≈ 0.0
 - [High-level interface](@ref) — the `snopt` entry point in detail.
 - [Low-level interface](@ref) — driving `snOptA`/`snOptB`/`snOptC` directly.
 - [Examples](@ref) — fully worked constrained and unconstrained problems.
-- [Optimization.jl integration](@ref) — using SNOPT through the SciML stack.
 - [API reference](@ref) — every exported symbol.
-
-## Relationship to Optimization.jl
-
-For modeling-first workflows, SNOPT is intended to be used through
-[Optimization.jl](https://github.com/SciML/Optimization.jl), which will handle
-automatic differentiation and problem assembly. That support is a **work in
-progress**; see [Optimization.jl integration](@ref).

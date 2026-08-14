@@ -35,6 +35,7 @@ mutable struct SnoptWorkspace
     iterations::Int
     major_itns::Int
     run_time::Float64
+    nS::Int
     function SnoptWorkspace(leniw::Int, lenrw::Int)
         # SNOPT's sninit writes a fixed-size header into iw/rw and requires at
         # least 500 elements in each. Smaller arrays let f_sninitx write out of
@@ -47,7 +48,7 @@ mutable struct SnoptWorkspace
                    0, 0,
                    Int32[0], [0.0],
                    Float64[], Float64[], 0.0,
-                   0, 0.0, 0, 0, 0.0)
+                   0, 0.0, 0, 0, 0.0, 0)
         finalizer(free!, prob)
         prob
     end
@@ -71,7 +72,7 @@ sparse derivative pattern is given separately as linear (`iAfun`/`jAvar`/`A`) an
 nonlinear (`iGfun`/`jGvar`) triples. Solve in place with [`snopta!`](@ref). Build the
 user function with [`make_usrfun_a`](@ref).
 """
-mutable struct SnoptA{F<:Function} <: AbstractSnoptProblem
+mutable struct SnoptA{F} <: AbstractSnoptProblem
     ws::SnoptWorkspace
     nf::Int                           # number of F rows: objective + constraints
     n::Int                            # number of design variables
@@ -111,7 +112,7 @@ sparsity is held in `J`. Solve in place with [`snoptb!`](@ref) (or the alias
 [`snopt!`](@ref)). Construct the callbacks with [`make_objfun`](@ref) and
 [`make_confun`](@ref).
 """
-mutable struct SnoptB{F1<:Function, F2<:Function} <: AbstractSnoptProblem
+mutable struct SnoptB{F1, F2} <: AbstractSnoptProblem
     ws::SnoptWorkspace
     n::Int                            # num design variables
     nc::Int                           # num nonlinear constraints
@@ -127,7 +128,14 @@ mutable struct SnoptB{F1<:Function, F2<:Function} <: AbstractSnoptProblem
     lambda::Vector{Float64}           # multipliers, filled after solve
     objfun::F1
     confun::F2
+    nS::Int                           # superbasics count, retained for warm starts
 end
+
+# Keeps the pre-0.3 positional form working; nS defaults to 0 (cold start).
+SnoptB(ws, n, nc, m_eff, nnobj, x, bl, bu, hs, J, obj_val, status, lambda,
+       objfun, confun) =
+    SnoptB(ws, n, nc, m_eff, nnobj, x, bl, bu, hs, J, obj_val, status, lambda,
+           objfun, confun, 0)
 
 """
     SnoptProblem
@@ -145,7 +153,7 @@ evaluates the objective, objective gradient, constraints, and constraint Jacobia
 together (the combined analogue of [`SnoptB`](@ref)'s split callbacks). Solve in
 place with [`snoptc!`](@ref). Build the user function with [`make_usrfun_c`](@ref).
 """
-mutable struct SnoptC{F<:Function} <: AbstractSnoptProblem
+mutable struct SnoptC{F} <: AbstractSnoptProblem
     ws::SnoptWorkspace
     n::Int                            # num design variables
     nc::Int                           # num nonlinear constraints
@@ -160,7 +168,14 @@ mutable struct SnoptC{F<:Function} <: AbstractSnoptProblem
     status::Int                       # SNOPT inform code, filled after solve
     lambda::Vector{Float64}           # multipliers, filled after solve
     usrfun::F
+    nS::Int                           # superbasics count, retained for warm starts
 end
+
+# Keeps the pre-0.3 positional form working; nS defaults to 0 (cold start).
+SnoptC(ws, n, nc, m_eff, nnobj, x, bl, bu, hs, J, obj_val, status, lambda,
+       usrfun) =
+    SnoptC(ws, n, nc, m_eff, nnobj, x, bl, bu, hs, J, obj_val, status, lambda,
+           usrfun, 0)
 
 """
     SnoptMemory
@@ -173,6 +188,21 @@ struct SnoptMemory
     info::Int
     miniw::Int
     minrw::Int
+end
+
+"""
+    SnoptBasis
+
+The basis SNOPT ended a solve with: the basis-status array `hs` for the extended
+problem, the number of superbasic variables `nS`, and the problem dimensions
+`n`/`m` they belong to. Pass one back to [`snopt`](@ref) as
+`start = "Warm", basis = result.basis` to warm-start a closely related solve.
+"""
+struct SnoptBasis
+    hs::Vector{Int32}
+    nS::Int
+    n::Int
+    m::Int
 end
 
 """
@@ -191,6 +221,7 @@ Outcome of a high-level [`snopt`](@ref) solve. Fields:
   * `iterations`, `major_itns`: total minor and major iteration counts.
   * `run_time`: SNOPT-reported solve time in seconds.
   * `memory`: the [`SnoptMemory`](@ref) estimate used to size the workspace.
+  * `basis`: the final [`SnoptBasis`](@ref), for warm-starting a later solve.
 """
 struct SnoptResult
     status::Int
@@ -204,6 +235,7 @@ struct SnoptResult
     major_itns::Int
     run_time::Float64
     memory::SnoptMemory
+    basis::SnoptBasis
 end
 
 """
@@ -262,5 +294,71 @@ struct SnoptMajorLog
     fcon::Vector{Float64}
     fx::Vector{Float64}
     ycon::Vector{Float64}
+    hs::Vector{Int32}
+end
+
+"""
+    SnoptStopEvent
+
+Snapshot of SNOPT's state at the end of a major iteration, delivered to the
+`snstop` callback of [`snopt`](@ref) (and built internally by
+[`make_snstop`](@ref)). SNOPT calls its `snSTOP` hook once per major iteration
+specifically so the caller can inspect the current iterate and decide whether to
+keep going, which makes it the place to implement custom termination criteria
+(wall-clock budgets, target objective values, external cancellation).
+
+`SnoptStopEvent` carries everything [`SnoptMajorLog`](@ref) carries plus the
+quantities SNOPT only exposes through `snSTOP`:
+
+  * `m`, `max_superbasics`, `negcon`: problem dimensions of the extended problem.
+  * `gobj`, `gcon`: current objective gradient and constraint Jacobian values.
+  * `fx`: the row values of the nonlinear constraints, alongside `fcon`.
+  * `pi`, `rc`, `rg`: multipliers for the rows, reduced costs for all extended
+    variables, and the reduced gradient of the superbasics.
+  * `bl`, `bu`: the bounds SNOPT is currently working with (after scaling).
+
+Return `false` from the callback to make SNOPT stop; the solve then finishes with
+inform code 74 (`:User_Requested_Stop`). Any other return value lets SNOPT
+continue.
+"""
+struct SnoptStopEvent
+    iteration::Int
+    major_iter::Int
+    minor_iter::Int
+    n_superbasics::Int
+    max_superbasics::Int
+    n_swaps::Int
+    objective::Float64
+    merit::Float64
+    penalty_norm::Float64
+    step::Float64
+    primal_infeasibility::Float64
+    dual_infeasibility::Float64
+    max_violation::Float64
+    relative_violation::Float64
+    condition_hessian::Float64
+    objective_scale::Float64
+    objective_add::Float64
+    f_objective::Float64
+    f_merit::Float64
+    minimize::Int
+    m::Int
+    n::Int
+    nb::Int
+    nncon::Int
+    nnobj::Int
+    negcon::Int
+    kt_conditions::NTuple{2, Bool}
+    x::Vector{Float64}
+    bl::Vector{Float64}
+    bu::Vector{Float64}
+    fcon::Vector{Float64}
+    fx::Vector{Float64}
+    gcon::Vector{Float64}
+    gobj::Vector{Float64}
+    ycon::Vector{Float64}
+    pi::Vector{Float64}
+    rc::Vector{Float64}
+    rg::Vector{Float64}
     hs::Vector{Int32}
 end

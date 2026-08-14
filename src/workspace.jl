@@ -9,6 +9,16 @@ const _SNOPT_ACTIVE_ID  = Threads.Atomic{Int}(0)
 const _SNOPT_ID_COUNTER = Threads.Atomic{Int}(0)
 const _SNOPT_ACTIVE_WORKSPACE = Ref{Any}(nothing)
 
+# SNOPT keeps one global Fortran session per process. This lock serializes
+# workspace creation and every solve, so a second task cannot close the
+# workspace another task is currently running inside. It is a ReentrantLock
+# because the high-level `snopt` holds it across both `initialize` and the
+# solve that follows.
+#
+# `free!` must NOT take this lock: it runs as a GC finalizer, where acquiring a
+# lock risks deadlock. Finalization stays on the atomic CAS above.
+const SNOPT_LOCK = ReentrantLock()
+
 function reset_snopt_defaults!(prob::SnoptWorkspace)
     optstring = "Defaults"
     errors = Int32[0]
@@ -28,9 +38,11 @@ function free!(prob::SnoptWorkspace)
     if !isempty(libsnopt7)
         # Only call f_snend for the workspace that last called f_sninitx. Any
         # older workspace that gets GC'd after being superseded skips the
-        # Fortran call.
+        # Fortran call, as does a workspace that never went through f_sninitx
+        # at all (init_id == 0): calling snEnd on uninitialized work arrays
+        # would make Fortran read garbage file-unit numbers.
         id = prob.init_id
-        should_end = id == 0 || Threads.atomic_cas!(_SNOPT_ACTIVE_ID, id, 0) == id
+        should_end = id != 0 && Threads.atomic_cas!(_SNOPT_ACTIVE_ID, id, 0) == id
         if should_end
             try
                 ccall((:f_snend, libsnopt7),
@@ -81,13 +93,37 @@ const RW_RUN_TIME   = 462  # rw(462): CPU run time in seconds    - SNOPT 7.7 rw 
 
 workspace_value(ws_rw::Vector{Float64}, index::Int) =
     length(ws_rw) >= index ? max(ws_rw[index], 0.0) : 0.0
-# The MinGW Windows wrapper expects genuinely empty filenames here.
-# Replacing them with "NUL" leaves the workspace partially initialized and the
-# first solve can fail with bogus storage errors.
 
+# On Windows the MinGW wrapper expects genuinely empty filenames for suppressed
+# output channels; replacing them with "NUL" leaves the workspace partially
+# initialized and the first solve can fail with bogus storage errors.
 const SNOPT_DEVNULL = Sys.iswindows() ? "" : "/dev/null"
 
 snopt_output_file(path::String) = isempty(path) ? SNOPT_DEVNULL : path
+
+# SNOPT wants a real, writable file for the summary channel. Routing both
+# channels to the null device instead is not a safe fallback: the Linux library
+# then becomes stateful across mixed solves and later solves fail with status 82
+# (insufficient storage). So try a sequence of writable locations and, if every
+# one fails, raise here rather than start a session that is quietly broken.
+#
+# Creating the file eagerly is what makes an unwritable directory surface now
+# instead of inside f_sninitx, which reports nothing.
+function scratch_summary_file()
+    attempts = String[]
+    for dir in (nothing, homedir(), pwd())
+        try
+            path, io = dir === nothing ? mktemp() : mktemp(dir)
+            close(io)
+            return path
+        catch err
+            push!(attempts, something(dir, get(ENV, "TMPDIR", tempdir())))
+        end
+    end
+    error("SNOPT.jl could not create a scratch summary file in any of: " *
+          join(repr.(attempts), ", ") * ". SNOPT needs one writable output " *
+          "file; pass an explicit `summfile` to choose the location yourself.")
+end
 
 function snopt_output_files(printfile::String, summfile::String)
     printpath = snopt_output_file(printfile)
@@ -98,7 +134,7 @@ function snopt_output_files(printfile::String, summfile::String)
         # SNOPT output channels are opened on the null device across mixed solves.
         # Keep the print channel suppressed and give the summary channel a real,
         # throwaway file.
-        summpath = tempname()
+        summpath = scratch_summary_file()
         push!(tempfiles, summpath)
     end
     return printpath, summpath, tempfiles
@@ -130,7 +166,7 @@ const SNOPT_STATUS = Dict(
     22 => :Unbounded_Problem_Detected,
     31 => :Maximum_Iterations_Exceeded,
     32 => :Maximum_Iterations_Exceeded,
-    33 => :Maximum_Iterations_Exceeded,
+    33 => :Superbasics_Limit_Too_Small,
     34 => :Maximum_CpuTime_Exceeded,
     41 => :Numerical_Difficulties,
     42 => :Numerical_Difficulties,
@@ -188,6 +224,13 @@ function initialize(printfile::String, summfile::String, leniw::Int, lenrw::Int)
         "SNOPT library not loaded. Set SNOPTDIR (or DYLD_LIBRARY_PATH on macOS) " *
         "to the directory containing libsnopt7 and restart Julia, " *
         "or call SNOPT.find_snopt_lib() to diagnose.")
+    return lock(SNOPT_LOCK) do
+        initialize_locked(printfile, summfile, leniw, lenrw)
+    end
+end
+
+function initialize_locked(printfile::String, summfile::String,
+                           leniw::Int, lenrw::Int)
     close_active_workspace!()
     prob = SnoptWorkspace(leniw, lenrw)
     printpath, summpath, tempfiles = snopt_output_files(printfile, summfile)
@@ -200,7 +243,14 @@ function initialize(printfile::String, summfile::String, leniw::Int, lenrw::Int)
            Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
           printpath, Cint(ncodeunits(printpath)), summpath, Cint(ncodeunits(summpath)),
           prob.iw, prob.leniw, prob.rw, prob.lenrw)
-    reset_snopt_defaults!(prob)
+    try
+        reset_snopt_defaults!(prob)
+    catch
+        # Failed initialization must not leave a half-set-up workspace claiming
+        # the active SNOPT session.
+        free!(prob)
+        rethrow()
+    end
     _SNOPT_ACTIVE_WORKSPACE[] = prob
     return prob
 end
