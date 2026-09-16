@@ -1,3 +1,11 @@
+"""
+    snopt_no_progress(event) -> true
+
+No-op progress callback: accepts every event and never requests termination. Use
+it as an explicit "do nothing" value wherever a `callback`/`snlog`/`snstop`
+argument is expected. It is not the default — those keywords default to
+`nothing`, which additionally skips building the event object.
+"""
 snopt_no_progress(event) = true
 
 workspace_value(ws_iw::Vector{Int32}, index::Int) =
@@ -21,6 +29,8 @@ copy_cdouble_vector(ptr::Ptr{Cdouble}, len::Integer) =
 copy_cint32_vector(ptr::Ptr{Cint}, len::Integer) =
     len <= 0 ? Int32[] : copy(unsafe_wrap(Array, ptr, Int(len)))
 
+# Closures record user errors; trampolines also catch callback dispatch errors.
+# Both layers rethrow after ccall. Exceptions must never unwind through Fortran.
 mutable struct SnoptCallbackState
     exception::Any
 end
@@ -69,27 +79,32 @@ end
 abstract type AbstractActiveSnoptCallbacks end
 
 mutable struct ActiveSnoptACallbacks <: AbstractActiveSnoptCallbacks
-    usrfun::Function
+    usrfun::Any
+    snlog::Any
+    snstop::Any
     exception::Any
 end
-ActiveSnoptACallbacks(usrfun::Function) = ActiveSnoptACallbacks(usrfun, nothing)
+ActiveSnoptACallbacks(usrfun; snlog=nothing, snstop=nothing) =
+    ActiveSnoptACallbacks(usrfun, snlog, snstop, nothing)
 
 mutable struct ActiveSnoptBCallbacks <: AbstractActiveSnoptCallbacks
-    confun::Function
-    objfun::Function
+    confun::Any
+    objfun::Any
     snlog::Any
+    snstop::Any
     exception::Any
 end
-ActiveSnoptBCallbacks(confun::Function, objfun::Function; snlog=nothing) =
-    ActiveSnoptBCallbacks(confun, objfun, snlog, nothing)
+ActiveSnoptBCallbacks(confun, objfun; snlog=nothing, snstop=nothing) =
+    ActiveSnoptBCallbacks(confun, objfun, snlog, snstop, nothing)
 
 mutable struct ActiveSnoptCCallbacks <: AbstractActiveSnoptCallbacks
-    usrfun::Function
+    usrfun::Any
     snlog::Any
+    snstop::Any
     exception::Any
 end
-ActiveSnoptCCallbacks(usrfun::Function; snlog=nothing) =
-    ActiveSnoptCCallbacks(usrfun, snlog, nothing)
+ActiveSnoptCCallbacks(usrfun; snlog=nothing, snstop=nothing) =
+    ActiveSnoptCCallbacks(usrfun, snlog, snstop, nothing)
 
 mutable struct ActiveSnoptCallbackRegistry
     next_id::Int32
@@ -149,17 +164,22 @@ end
 
 function with_active_snopt_callbacks(f::Function, ws::SnoptWorkspace,
                                      callbacks::AbstractActiveSnoptCallbacks)
-    old_iu = ws.iu
-    old_leniu = ws.leniu
-    callback_id = register_active_snopt_callbacks!(callbacks)
-    ws.iu = Int32[callback_id]
-    ws.leniu = 1
-    try
-        return f()
-    finally
-        unregister_active_snopt_callbacks!(callback_id)
-        ws.iu = old_iu
-        ws.leniu = old_leniu
+    return lock(SNOPT_LOCK) do
+        require_idle_snopt("snopt!")
+        old_iu = ws.iu
+        old_leniu = ws.leniu
+        callback_id = register_active_snopt_callbacks!(callbacks)
+        ws.iu = Int32[callback_id]
+        ws.leniu = 1
+        _SNOPT_SOLVE_ACTIVE[] = true
+        try
+            return f()
+        finally
+            _SNOPT_SOLVE_ACTIVE[] = false
+            unregister_active_snopt_callbacks!(callback_id)
+            ws.iu = old_iu
+            ws.leniu = old_leniu
+        end
     end
 end
 
@@ -345,11 +365,68 @@ function snopt_snlog_trampoline(
     return
 end
 
+# snSTOP carries the same leading arguments as snLog plus the extra dimensions
+# (m, maxS, nnCon, nnObj0, negCon) and the extra vectors (gCon, gObj, pi, rc, rg)
+# that snLog does not receive. Argument order follows SNOPT 7.7's snKer* call
+# sites; `test/snopt_tests.jl` cross-checks the scalars against the snLog event
+# of the same major iteration, which is what pins the layout down.
+function snopt_snstop_trampoline(
+    iAbort_::Ptr{Cint}, KTcond_::Ptr{Cint},
+    MjrPrt_::Ptr{Cint}, minimz_::Ptr{Cint},
+    m_::Ptr{Cint}, maxS_::Ptr{Cint},
+    n_::Ptr{Cint}, nb_::Ptr{Cint},
+    nnCon0_::Ptr{Cint}, nnCon_::Ptr{Cint},
+    nnObj0_::Ptr{Cint}, nnObj_::Ptr{Cint}, nS_::Ptr{Cint},
+    itn_::Ptr{Cint}, nMajor_::Ptr{Cint},
+    nMinor_::Ptr{Cint}, nSwap_::Ptr{Cint},
+    condHz_::Ptr{Cdouble}, iObj_::Ptr{Cint},
+    sclObj_::Ptr{Cdouble}, ObjAdd_::Ptr{Cdouble},
+    fObj_::Ptr{Cdouble}, fMrt_::Ptr{Cdouble},
+    PenNrm_::Ptr{Cdouble}, step_::Ptr{Cdouble},
+    prInf_::Ptr{Cdouble}, duInf_::Ptr{Cdouble},
+    vimax_::Ptr{Cdouble}, virel_::Ptr{Cdouble},
+    hs_::Ptr{Cint}, ne_::Ptr{Cint},
+    nlocJ_::Ptr{Cint}, locJ_::Ptr{Cint},
+    indJ_::Ptr{Cint}, Jcol_::Ptr{Cdouble},
+    negCon_::Ptr{Cint},
+    Ascale_::Ptr{Cdouble}, bl_::Ptr{Cdouble},
+    bu_::Ptr{Cdouble}, Fx_::Ptr{Cdouble},
+    fCon_::Ptr{Cdouble},
+    gCon_::Ptr{Cdouble}, gObj_::Ptr{Cdouble},
+    yCon_::Ptr{Cdouble}, pi_::Ptr{Cdouble},
+    rc_::Ptr{Cdouble}, rg_::Ptr{Cdouble},
+    x_::Ptr{Cdouble}, cu_::Ptr{UInt8},
+    lencu_::Ptr{Cint}, iu_::Ptr{Cint},
+    leniu_::Ptr{Cint}, ru_::Ptr{Cdouble},
+    lenru_::Ptr{Cint}, cw_::Ptr{UInt8},
+    lencw_::Ptr{Cint}, iw_::Ptr{Cint},
+    leniw_::Ptr{Cint}, rw_::Ptr{Cdouble},
+    lenrw_::Ptr{Cint})::Cvoid
+    callbacks = nothing
+    try
+        callbacks = active_snopt_callbacks(iu_, leniu_)
+        snstop = callbacks.snstop
+        snstop === nothing && error("SNOPT snSTOP callback invoked without active snSTOP state")
+        snstop(iAbort_, KTcond_, MjrPrt_, minimz_, m_, maxS_, n_, nb_, nnCon0_,
+               nnCon_, nnObj0_, nnObj_, nS_, itn_, nMajor_, nMinor_, nSwap_,
+               condHz_, iObj_, sclObj_, ObjAdd_, fObj_, fMrt_, PenNrm_, step_,
+               prInf_, duInf_, vimax_, virel_, hs_, ne_, nlocJ_, locJ_, indJ_,
+               Jcol_, negCon_, Ascale_, bl_, bu_, Fx_, fCon_, gCon_, gObj_,
+               yCon_, pi_, rc_, rg_, x_, cu_, lencu_, iu_, leniu_, ru_, lenru_, cw_,
+               lencw_, iw_, leniw_, rw_, lenrw_)
+    catch err
+        callbacks !== nothing && record_active_callback_exception!(callbacks, err)
+        unsafe_store!(iAbort_, Cint(1))
+    end
+    return
+end
+
 const SNOPTA_CALLBACK_PTR = Ref{Ptr{Cvoid}}(C_NULL)
 const SNOPTB_OBJ_CALLBACK_PTR = Ref{Ptr{Cvoid}}(C_NULL)
 const SNOPTB_CON_CALLBACK_PTR = Ref{Ptr{Cvoid}}(C_NULL)
 const SNOPTC_CALLBACK_PTR = Ref{Ptr{Cvoid}}(C_NULL)
 const SNOPT_SNLOG_CALLBACK_PTR = Ref{Ptr{Cvoid}}(C_NULL)
+const SNOPT_SNSTOP_CALLBACK_PTR = Ref{Ptr{Cvoid}}(C_NULL)
 
 function init_callback_pointers!()
     SNOPTA_CALLBACK_PTR[] = @cfunction(snopta_usrfun_trampoline, Cvoid,
@@ -392,6 +469,23 @@ function init_callback_pointers!()
          Ptr{UInt8}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
          Ptr{Cdouble}, Ptr{Cint}, Ptr{UInt8}, Ptr{Cint},
          Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble}, Ptr{Cint}))
+
+    SNOPT_SNSTOP_CALLBACK_PTR[] = @cfunction(snopt_snstop_trampoline, Cvoid,
+        (Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+         Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+         Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+         Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+         Ptr{Cdouble}, Ptr{Cint}, Ptr{Cdouble}, Ptr{Cdouble},
+         Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble},
+         Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble},
+         Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+         Ptr{Cdouble}, Ptr{Cint},
+         Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble},
+         Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble},
+         Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble},
+         Ptr{UInt8}, Ptr{Cint}, Ptr{Cint}, Ptr{Cint},
+         Ptr{Cdouble}, Ptr{Cint}, Ptr{UInt8}, Ptr{Cint},
+         Ptr{Cint}, Ptr{Cint}, Ptr{Cdouble}, Ptr{Cint}))
     return nothing
 end
 
@@ -403,14 +497,14 @@ end
 
 """
     make_snlog(callback)
+
 Create a Julia callback compatible with SNOPT's `snLog` hook. `callback` is
 called with a [`SnoptMajorLog`](@ref) after each major-iteration log event.
-Returning `false` requests termination from SNOPT.
-SNOPT passes these arguments in the same order used by `snLog` in the SNOPT 7
-interface. The `@cfunction` signature in `snoptb!` must stay in this order.
+Returning `false` requests termination from SNOPT; any other return value lets
+SNOPT continue. The `snlog` hook is available for [`SnoptA`](@ref),
+[`SnoptB`](@ref), and [`SnoptC`](@ref) solves.
 
 """
-
 function make_snlog(callback)
     state = SnoptCallbackState()
 
@@ -495,6 +589,121 @@ function make_snlog(callback)
 end
 
 """
+    make_snstop(callback)
+
+Create a Julia callback compatible with SNOPT's `snSTOP` hook. `callback` is
+called with a [`SnoptStopEvent`](@ref) at the end of every major iteration.
+Returning `false` makes SNOPT stop (the solve then reports inform code 74,
+`:User_Requested_Stop`); any other return value lets SNOPT continue. The
+`snstop` hook is available for [`SnoptA`](@ref), [`SnoptB`](@ref), and
+[`SnoptC`](@ref) solves.
+"""
+function make_snstop(callback)
+    state = SnoptCallbackState()
+
+    function snstop(iAbort_::Ptr{Cint}, KTcond_::Ptr{Cint},
+                    MjrPrt_::Ptr{Cint}, minimz_::Ptr{Cint},
+                    m_::Ptr{Cint}, maxS_::Ptr{Cint},
+                    n_::Ptr{Cint}, nb_::Ptr{Cint},
+                    nnCon0_::Ptr{Cint}, nnCon_::Ptr{Cint},
+                    nnObj0_::Ptr{Cint}, nnObj_::Ptr{Cint}, nS_::Ptr{Cint},
+                    itn_::Ptr{Cint}, nMajor_::Ptr{Cint},
+                    nMinor_::Ptr{Cint}, nSwap_::Ptr{Cint},
+                    condHz_::Ptr{Cdouble}, iObj_::Ptr{Cint},
+                    sclObj_::Ptr{Cdouble}, ObjAdd_::Ptr{Cdouble},
+                    fObj_::Ptr{Cdouble}, fMrt_::Ptr{Cdouble},
+                    PenNrm_::Ptr{Cdouble}, step_::Ptr{Cdouble},
+                    prInf_::Ptr{Cdouble}, duInf_::Ptr{Cdouble},
+                    vimax_::Ptr{Cdouble}, virel_::Ptr{Cdouble},
+                    hs_::Ptr{Cint}, ne_::Ptr{Cint},
+                    nlocJ_::Ptr{Cint}, locJ_::Ptr{Cint},
+                    indJ_::Ptr{Cint}, Jcol_::Ptr{Cdouble},
+                    negCon_::Ptr{Cint},
+                    Ascale_::Ptr{Cdouble}, bl_::Ptr{Cdouble},
+                    bu_::Ptr{Cdouble}, Fx_::Ptr{Cdouble},
+                    fCon_::Ptr{Cdouble},
+                    gCon_::Ptr{Cdouble}, gObj_::Ptr{Cdouble},
+                    yCon_::Ptr{Cdouble}, pi_::Ptr{Cdouble},
+                    rc_::Ptr{Cdouble}, rg_::Ptr{Cdouble},
+                    x_::Ptr{Cdouble}, cu_::Ptr{UInt8},
+                    lencu_::Ptr{Cint}, iu_::Ptr{Cint},
+                    leniu_::Ptr{Cint}, ru_::Ptr{Cdouble},
+                    lenru_::Ptr{Cint}, cw_::Ptr{UInt8},
+                    lencw_::Ptr{Cint}, iw_::Ptr{Cint},
+                    leniw_::Ptr{Cint}, rw_::Ptr{Cdouble},
+                    lenrw_::Ptr{Cint})::Cvoid
+        try
+            m = Int(unsafe_load(m_))
+            maxs = Int(unsafe_load(maxS_))
+            n = Int(unsafe_load(n_))
+            nb = Int(unsafe_load(nb_))
+            nncon0 = Int(unsafe_load(nnCon0_))
+            nncon = Int(unsafe_load(nnCon_))
+            nnobj0 = Int(unsafe_load(nnObj0_))
+            nnobj = Int(unsafe_load(nnObj_))
+            negcon = Int(unsafe_load(negCon_))
+            ktcond = unsafe_wrap(Array, KTcond_, 2)
+            penalty = unsafe_wrap(Array, PenNrm_, 4)
+            objective_add = unsafe_load(ObjAdd_)
+            f_objective = unsafe_load(fObj_)
+            f_merit = unsafe_load(fMrt_)
+            objective_scale = unsafe_load(sclObj_)
+            iobj = Int(unsafe_load(iObj_))
+            x_values = copy_cdouble_vector(x_, nb)
+            linear_objective = (iobj > 0 && n + iobj <= length(x_values)) ?
+                x_values[n + iobj] : 0.0
+            event = SnoptStopEvent(
+                Int(unsafe_load(itn_)),
+                Int(unsafe_load(nMajor_)),
+                Int(unsafe_load(nMinor_)),
+                Int(unsafe_load(nS_)),
+                maxs,
+                Int(unsafe_load(nSwap_)),
+                objective_add + linear_objective + f_objective,
+                objective_add + linear_objective + f_merit,
+                Float64(penalty[3]),
+                unsafe_load(step_),
+                unsafe_load(prInf_),
+                unsafe_load(duInf_),
+                unsafe_load(vimax_),
+                unsafe_load(virel_),
+                unsafe_load(condHz_),
+                objective_scale,
+                objective_add,
+                f_objective,
+                f_merit,
+                Int(unsafe_load(minimz_)),
+                m,
+                n,
+                nb,
+                nncon,
+                nnobj,
+                negcon,
+                (ktcond[1] != 0, ktcond[2] != 0),
+                x_values,
+                copy_cdouble_vector(bl_, nb),
+                copy_cdouble_vector(bu_, nb),
+                copy_cdouble_vector(fCon_, nncon0),
+                copy_cdouble_vector(Fx_, nncon0),
+                copy_cdouble_vector(gCon_, negcon),
+                copy_cdouble_vector(gObj_, nnobj0),
+                copy_cdouble_vector(yCon_, nncon0),
+                copy_cdouble_vector(pi_, m),
+                copy_cdouble_vector(rc_, nb),
+                copy_cdouble_vector(rg_, maxs),
+                copy_cint32_vector(hs_, nb)
+            )
+            unsafe_store!(iAbort_, call_progress(callback, event) ? Cint(0) : Cint(1))
+        catch err
+            record_callback_exception!(state, err)
+            unsafe_store!(iAbort_, Cint(1))
+        end
+        return
+    end
+    return register_callback_state!(snstop, state)
+end
+
+"""
     make_objfun(eval_obj, eval_grad, ws_iw; callback=nothing)
 Create the SNOPT objective callback. If `callback` is provided, it is called as
 `callback(event::NamedTuple)::Bool` after objective-value evaluations. Returning
@@ -504,8 +713,7 @@ Objective events contain `kind = :objective`, `mode`, `major_iter`,
 `minor_iter`, `x`, and `f`.
 
 """
-
-function make_objfun(eval_obj::Function, eval_grad::Function,
+function make_objfun(eval_obj, eval_grad,
                      ws_iw::Vector{Int32}; callback=nothing)
     state = SnoptCallbackState()
 
@@ -544,7 +752,7 @@ function make_objfun(eval_obj::Function, eval_grad::Function,
     return register_callback_state!(objfun, state)
 end
 
-function make_objfun(eval_obj::Function, eval_grad::Function, log_fn::Function,
+function make_objfun(eval_obj, eval_grad, log_fn::Function,
                      ws_iw::Vector{Int32})
     return make_objfun(eval_obj, eval_grad, ws_iw;
                        callback=legacy_progress_callback(log_fn))
@@ -560,8 +768,7 @@ Constraint events contain `kind = :constraint`, `mode`, `major_iter`,
 per-evaluation event allocation.
 
 """
-
-function make_confun(eval_con::Function, eval_jac::Function, J,
+function make_confun(eval_con, eval_jac, J,
                      ws_iw::Vector{Int32}; callback=nothing)
     state = SnoptCallbackState()
 
@@ -602,7 +809,7 @@ function make_confun(eval_con::Function, eval_jac::Function, J,
     return register_callback_state!(confun, state)
 end
 
-make_confun(eval_con::Function, eval_jac::Function, J) =
+make_confun(eval_con, eval_jac, J) =
     make_confun(eval_con, eval_jac, J, Int32[])
 
 """
@@ -617,8 +824,7 @@ fill by finite differences. This requires SNOPT to be configured for
 finite-difference gradients via `set_option!(ws, "Derivative option", 0)`.
 
 """
-
-function make_usrfun_a(eval_F::Function; eval_G=nothing, callback=nothing)
+function make_usrfun_a(eval_F; eval_G=nothing, callback=nothing)
     state = SnoptCallbackState()
 
     function usrfun(status_::Ptr{Cint}, n_::Ptr{Cint}, x_::Ptr{Cdouble},
@@ -659,13 +865,20 @@ end
 
 """
     make_usrfun_c(eval_obj, eval_grad, eval_con, eval_jac, J, ws_iw; callback=nothing)
+
 Create the combined callback used by SNOPT-C. This is the SNOPT-C equivalent
-of `make_objfun` plus `make_confun`.
+of [`make_objfun`](@ref) plus [`make_confun`](@ref): `eval_obj(x)` returns the
+objective, `eval_grad(g, x)` fills the objective gradient, `eval_con(c, x)` fills
+constraint values, and `eval_jac(jnz, x)` fills the nonlinear constraint Jacobian
+nonzeros in the column-major order of `J`.
+
+If `callback` is provided, it is called with a combined evaluation event containing
+`kind = :combined`, `mode`, `major_iter`, `minor_iter`, `x`, `f`, and `c`.
+Returning `false` requests SNOPT termination.
 
 """
-
-function make_usrfun_c(eval_obj::Function, eval_grad::Function,
-                       eval_con::Function, eval_jac::Function, J,
+function make_usrfun_c(eval_obj, eval_grad,
+                       eval_con, eval_jac, J,
                        ws_iw::Vector{Int32}; callback=nothing)
     state = SnoptCallbackState()
 
@@ -717,11 +930,18 @@ function make_usrfun_c(eval_obj::Function, eval_grad::Function,
     return register_callback_state!(usrfun, state)
 end
 
-function make_usrfun_c(eval_obj::Function, eval_grad::Function,
-                       eval_con::Function, eval_jac::Function, J)
+function make_usrfun_c(eval_obj, eval_grad,
+                       eval_con, eval_jac, J)
     return make_usrfun_c(eval_obj, eval_grad, eval_con, eval_jac, J, Int32[])
 end
 
+"""
+    make_dummy_confun()
+
+Create a no-op SNOPT-B constraint callback for unconstrained problems (`nc == 0`).
+SNOPT still expects a constraint-function pointer even when there are no nonlinear
+constraints; this returns one that does nothing. Used internally by [`snopt`](@ref).
+"""
 function make_dummy_confun()
     function dummy_confun(_::Ptr{Cint}, _::Ptr{Cint}, _::Ptr{Cint}, _::Ptr{Cint},
                           _::Ptr{Cdouble}, _::Ptr{Cdouble}, _::Ptr{Cdouble},

@@ -8,19 +8,55 @@ using SparseArrays: SparseMatrixCSC, nnz
 # which is negligible overhead compared to any SNOPT solve.
 global libsnopt7::String = ""
 
+# A library that dlopens is not necessarily usable: SNOPT can be built without
+# the snopt-interface C shims, and then every ccall in this package would fail
+# at solve time instead of at load time. Probe every symbol this package calls
+# (keep this tuple in sync with the ccall sites: `grep -oh ':f_[a-z]*' src/*.jl`).
+const REQUIRED_SNOPT_SYMBOLS = (
+    :f_sninitx, :f_snend,                       # session setup / teardown
+    :f_snset, :f_snseti, :f_snsetr, :f_snspecf, # options
+    :f_snmem,                                   # workspace sizing
+    :f_snopta, :f_snoptb, :f_snoptc,            # solvers
+    :f_snkera, :f_snkerb, :f_snkerc,            # kernels behind snlog/snstop
+)
+
 function loadable_library_path(libpath::AbstractString)
     isempty(libpath) && return ""
     d = Libdl.dlopen_e(libpath)
     d == C_NULL && return ""
-    Libdl.dlclose(d)
-    return String(libpath)
+    try
+        for sym in REQUIRED_SNOPT_SYMBOLS
+            Libdl.dlsym_e(d, sym) == C_NULL && return ""
+        end
+    finally
+        Libdl.dlclose(d)
+    end
+    # Callers hand in either a directory join (relative when SNOPTDIR or a
+    # library-path entry is relative) or a loader-resolved dlpath (already
+    # absolute); normalize so the documented "absolute path" promise holds.
+    return String(abspath(libpath))
 end
 
+"""
+    find_snopt_lib() -> String
+
+Search for a loadable `libsnopt7` and return its absolute path, or an empty string
+if none is found. The search checks `SNOPTDIR` first (warning if it is set but the
+library there cannot be loaded), then the platform library path
+(`LD_LIBRARY_PATH`, also `DYLD_LIBRARY_PATH` on macOS, or `PATH` on Windows), and
+finally the system loader's default search paths (for example `/usr/lib` via
+`ld.so` on Linux). This is run once during `__init__` to set the global
+`SNOPT.libsnopt7`; call it directly to diagnose why a library is not being picked
+up. See also [`has_snopt`](@ref).
+"""
 function find_snopt_lib()
     libname = string("lib", "snopt7", ".", Libdl.dlext)
     snoptdir = get(ENV, "SNOPTDIR", "")
     if !isempty(snoptdir)
-        return loadable_library_path(joinpath(snoptdir, libname))
+        libpath = loadable_library_path(joinpath(snoptdir, libname))
+        isempty(libpath) || return libpath
+        @warn "SNOPTDIR is set but no loadable SNOPT library was found there; " *
+              "falling back to the platform library path" SNOPTDIR = snoptdir libname
     end
 
     paths_to_try = String[]
@@ -43,20 +79,21 @@ function find_snopt_lib()
             return libpath
         end
     end
+
+    # Last resort: let the system loader search its default paths (ld.so cache,
+    # /usr/lib, ...), where a bare directory scan above would never look.
+    handle = Libdl.dlopen_e(libname)
+    if handle != C_NULL
+        libpath = String(Libdl.dlpath(handle))
+        Libdl.dlclose(handle)
+        return loadable_library_path(libpath)
+    end
     return ""
 end
 
 function __init__()
     global libsnopt7 = find_snopt_lib()
-    if isempty(libsnopt7)
-        @warn """
-              SNOPT.jl: SNOPT library not found. has_snopt() returns false.
-              Set SNOPTDIR to the directory containing libsnopt7, or add it to the platform library path:
-                  export SNOPTDIR=/path/to/snopt/lib
-                  export LD_LIBRARY_PATH=/path/to/snopt/lib:\$LD_LIBRARY_PATH
-                  export DYLD_LIBRARY_PATH=/path/to/snopt/lib:\$DYLD_LIBRARY_PATH  # macOS
-              """
-    else
+    if !isempty(libsnopt7)
         # Preload OpenMP companion library if it lives alongside libsnopt7.
         # Use the non-throwing dlopen so a missing or incompatible companion
         # never aborts module initialization; libsnopt7 itself already loaded.
@@ -66,6 +103,15 @@ function __init__()
     init_callback_pointers!()
 end
 
+"""
+    has_snopt() -> Bool
+
+Return `true` if a usable SNOPT library was located and loaded during module
+initialization. When this is `false`, the resolved path in the global
+`SNOPT.libsnopt7` is empty and any solve raises an error explaining how to provide
+the library; see
+[`find_snopt_lib`](@ref) to diagnose.
+"""
 has_snopt() = !isempty(libsnopt7)
 
 include("types.jl")
@@ -81,11 +127,14 @@ export SnoptA
 export SnoptB
 export SnoptC
 export AbstractSnoptProblem
+export SnoptBasis
 export SnoptMajorLog
 export SnoptMemory
 export SnoptProblem
 export SnoptResult
+export SnoptStopEvent
 export make_snlog
+export make_snstop
 export snopt
 export snopt!
 export snopta!
