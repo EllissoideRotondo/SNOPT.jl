@@ -21,7 +21,7 @@
 ### Added
 
 - `SnoptBasis` and the `basis` keyword of `snopt`, which make `start = "Warm"`
-  and `start = "Hot"` reuse the previous basis instead of silently starting cold.
+  reuse the previous basis instead of silently starting cold.
 - `snlog` now works on `SnoptA` solves, through SNOPT's `snKerA` kernel.
 - `snstop`, SNOPT's `snSTOP` termination hook, is available on `snopt`, `snopt!`,
   `snopta!`, `snoptb!`, and `snoptc!`. It delivers a `SnoptStopEvent` per major

@@ -1,23 +1,20 @@
-# Tracks the init_id of the workspace most recently passed to f_sninitx.
-# On Linux, SNOPT's Fortran common blocks are global and are associated with the
-# most recently initialized workspace. Calling f_snend on a superseded workspace
-# corrupts the active workspace's state, causing subsequent solves to fail with
-# status 82 (Insufficient_Memory) or 91 (Invalid_Problem_Definition).
-# Using atomics here is intentional: ReentrantLock must not be acquired inside
-# a Julia GC finalizer (risk of deadlock), but atomic CAS is safe.
-const _SNOPT_ACTIVE_ID  = Threads.Atomic{Int}(0)
+# The latest initialized workspace owns SNOPT's process-wide Fortran state.
+# Atomic compare-and-swap prevents finalizers from ending a superseded session.
+const _SNOPT_ACTIVE_ID = Threads.Atomic{Int}(0)
 const _SNOPT_ID_COUNTER = Threads.Atomic{Int}(0)
 const _SNOPT_ACTIVE_WORKSPACE = Ref{Any}(nothing)
 
-# SNOPT keeps one global Fortran session per process. This lock serializes
-# workspace creation and every solve, so a second task cannot close the
-# workspace another task is currently running inside. It is a ReentrantLock
-# because the high-level `snopt` holds it across both `initialize` and the
-# solve that follows.
-#
-# `free!` must NOT take this lock: it runs as a GC finalizer, where acquiring a
-# lock risks deadlock. Finalization stays on the atomic CAS above.
+# Serialize workspace creation, native calls, and explicit cleanup.
+# Reentrancy permits high-level operations to call lower-level entry points.
+# The solve flag separately rejects callback reentry into the Fortran session.
 const SNOPT_LOCK = ReentrantLock()
+const _SNOPT_SOLVE_ACTIVE = Ref(false)
+
+function require_idle_snopt(action::AbstractString)
+    _SNOPT_SOLVE_ACTIVE[] && throw(ArgumentError(
+        "$(action) cannot run during an active SNOPT solve; call it after the solve returns"))
+    return nothing
+end
 
 function reset_snopt_defaults!(prob::SnoptWorkspace)
     optstring = "Defaults"
@@ -33,14 +30,19 @@ function reset_snopt_defaults!(prob::SnoptWorkspace)
 end
 
 function free!(prob::SnoptWorkspace)
+    return lock(SNOPT_LOCK) do
+        prob.finalized && return nothing
+        require_idle_snopt("close")
+        close_workspace_locked!(prob)
+    end
+end
+
+# Only explicit close may end the process-wide Fortran session.
+function close_workspace_locked!(prob::SnoptWorkspace)
     prob.finalized && return nothing
     prob.finalized = true
     if !isempty(libsnopt7)
-        # Only call f_snend for the workspace that last called f_sninitx. Any
-        # older workspace that gets GC'd after being superseded skips the
-        # Fortran call, as does a workspace that never went through f_sninitx
-        # at all (init_id == 0): calling snEnd on uninitialized work arrays
-        # would make Fortran read garbage file-unit numbers.
+        # Uninitialized and superseded workspaces must never call f_snend.
         id = prob.init_id
         should_end = id != 0 && Threads.atomic_cas!(_SNOPT_ACTIVE_ID, id, 0) == id
         if should_end
@@ -49,11 +51,16 @@ function free!(prob::SnoptWorkspace)
                       Cvoid, (Ptr{Cint}, Cint, Ptr{Float64}, Cint),
                       prob.iw, prob.leniw, prob.rw, prob.lenrw)
             catch
-                # Finalizers may run during shutdown when the shared library
-                # is gone.
+                # The shared library may already be unavailable during shutdown.
             end
         end
     end
+    cleanup_workspace_files!(prob)
+    _SNOPT_ACTIVE_WORKSPACE[] === prob && (_SNOPT_ACTIVE_WORKSPACE[] = nothing)
+    return nothing
+end
+
+function cleanup_workspace_files!(prob::SnoptWorkspace)
     for path in prob.tempfiles
         try
             isfile(path) && rm(path; force=true)
@@ -62,7 +69,16 @@ function free!(prob::SnoptWorkspace)
         end
     end
     empty!(prob.tempfiles)
-    _SNOPT_ACTIVE_WORKSPACE[] === prob && (_SNOPT_ACTIVE_WORKSPACE[] = nothing)
+    return nothing
+end
+
+# GC finalizers never call SNOPT. Active sessions remain strongly rooted and
+# are closed explicitly or when the next workspace is initialized.
+function gc_finalize_workspace!(prob::SnoptWorkspace)
+    prob.finalized && return nothing
+    _SNOPT_ACTIVE_WORKSPACE[] === prob && return nothing
+    prob.finalized = true
+    cleanup_workspace_files!(prob)
     return nothing
 end
 
@@ -80,6 +96,7 @@ Base.close(prob::SnoptWorkspace) = free!(prob)
 Base.isopen(prob::SnoptWorkspace) = !prob.finalized
 
 function require_open_workspace(prob::SnoptWorkspace, action::AbstractString)
+    require_idle_snopt(action)
     isopen(prob) ||
         throw(ArgumentError("$(action) requires an open SNOPT workspace"))
     return prob
@@ -101,14 +118,8 @@ const SNOPT_DEVNULL = Sys.iswindows() ? "" : "/dev/null"
 
 snopt_output_file(path::String) = isempty(path) ? SNOPT_DEVNULL : path
 
-# SNOPT wants a real, writable file for the summary channel. Routing both
-# channels to the null device instead is not a safe fallback: the Linux library
-# then becomes stateful across mixed solves and later solves fail with status 82
-# (insufficient storage). So try a sequence of writable locations and, if every
-# one fails, raise here rather than start a session that is quietly broken.
-#
-# Creating the file eagerly is what makes an unwritable directory surface now
-# instead of inside f_sninitx, which reports nothing.
+# Linux SNOPT needs one real output file to avoid status 82 in later solves.
+# Create it before f_sninitx so unwritable paths raise a Julia exception.
 function scratch_summary_file()
     attempts = String[]
     for dir in (nothing, homedir(), pwd())
@@ -130,10 +141,7 @@ function snopt_output_files(printfile::String, summfile::String)
     summpath = snopt_output_file(summfile)
     tempfiles = String[]
     if isempty(printfile) && isempty(summfile)
-        # The Linux library can become stateful in surprising ways when both
-        # SNOPT output channels are opened on the null device across mixed solves.
-        # Keep the print channel suppressed and give the summary channel a real,
-        # throwaway file.
+        # Keep a real summary file while suppressing visible output.
         summpath = scratch_summary_file()
         push!(tempfiles, summpath)
     end
@@ -217,7 +225,8 @@ end
 ```
 
 Calling `initialize` closes any previous active workspace. Workspace creation
-and solves are serialized within each Julia process.
+and solves are serialized within each Julia process. Callbacks must not create,
+close, configure, or solve workspaces until the current solve returns.
 
 """
 function initialize(printfile::String, summfile::String)
@@ -236,6 +245,7 @@ end
 
 function initialize_locked(printfile::String, summfile::String,
                            leniw::Int, lenrw::Int)
+    require_idle_snopt("initialize")
     close_active_workspace!()
     prob = SnoptWorkspace(leniw, lenrw)
     printpath, summpath, tempfiles = snopt_output_files(printfile, summfile)
@@ -251,8 +261,7 @@ function initialize_locked(printfile::String, summfile::String,
     try
         reset_snopt_defaults!(prob)
     catch
-        # Failed initialization must not leave a half-set-up workspace claiming
-        # the active SNOPT session.
+        # Release the session when initialization fails.
         free!(prob)
         rethrow()
     end

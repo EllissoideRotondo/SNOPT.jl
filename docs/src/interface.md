@@ -19,7 +19,10 @@ result = snopt(eval_obj, eval_grad, x0; kwargs...)
 | `eval_grad` | `eval_grad(gradient, x)` fills every gradient entry. |
 | `x0` | Finite starting point with at least one variable. |
 
-The gradient callback may return any value. SNOPT uses the mutated array.
+Let `n = length(x0)`. Both `x` and `gradient` have length `n`.
+Treat `x` as read-only. The gradient callback may return any value; SNOPT uses the mutated array.
+SNOPT.jl copies `x0` and bounds, and uses `Float64` arrays internally.
+Copy callback arrays before retaining them; SNOPT reuses their storage.
 
 ```julia
 using SNOPT
@@ -44,7 +47,7 @@ must estimate derivatives with finite differences.
 `lb` and `ub` set lower and upper variable bounds. Each value may be a scalar
 or a vector of length `length(x0)`.
 
-Omitted bounds are infinite. SNOPT.jl maps `Inf` to SNOPT's finite sentinel.
+Omitted bounds are infinite. SNOPT.jl represents `Inf` and `-Inf` as `1.0e20` and `-1.0e20`.
 
 ```julia
 result = snopt(
@@ -69,11 +72,17 @@ Provide all four required constraint arguments together.
 | `lcon` | Constraint lower bounds. |
 | `ucon` | Constraint upper bounds with the same length. |
 
-`J` may provide the sparse Jacobian structure. A Jacobian is the matrix of
-constraint derivatives. SNOPT.jl uses a dense structure when `J` is omitted.
+Let `m = length(lcon)`. Both constraint bounds must be vectors of length `m`.
+`values` has length `m`. Constraint bounds cannot contain `NaN`.
+
+`J` may provide the sparse Jacobian structure, with shape `(m, n)`.
+A Jacobian is the matrix of constraint derivatives.
+SNOPT.jl uses a dense structure when `J` is omitted.
 
 `eval_jac` must follow `J.nzval` order. Julia sparse matrices store those values
 by column. The numeric values initially stored in `J` are ignored.
+The `nonzeros` array has length `nnz(J)`, or `m * n` when `J` is omitted.
+Include every derivative that can become nonzero, even if it is zero at `x0`.
 
 ```julia
 using SparseArrays
@@ -131,7 +140,8 @@ options = [
 Values may be integers, finite floats, strings, or symbols. Boolean values are
 rejected because Julia treats them as integers.
 
-Use [`read_options`](@ref) to read a SNOPT specs file. See the
+The low-level [`read_options`](@ref) function loads a SNOPT specs file into an open workspace.
+A specs file is a text file of native solver settings. See the
 [SNOPT option reference](https://ccom.ucsd.edu/~optimizers/docs/snopt/options.html)
 for all native settings.
 
@@ -145,8 +155,15 @@ Three callbacks expose different solver events.
 | `snstop` | Once per major iteration | [`SnoptStopEvent`](@ref) |
 | `callback` | Every objective or constraint evaluation | `NamedTuple` |
 
+Major iterations update the nonlinear problem. Minor iterations solve each quadratic subproblem.
+
 Return `false` from any callback to request termination. Return any other value
 to continue.
+
+Evaluation events contain `kind`, `mode`, `major_iter`, `minor_iter`, and a copy of `x`.
+Objective events add `f`; constraint events add `c`.
+They also occur during the initial callback check, before solver iterations begin.
+Errors thrown by callbacks propagate to the caller after workspace cleanup.
 
 Use `snlog` for progress output. Use `snstop` for custom stopping rules.
 Use `callback` only when evaluation-level events are needed.
@@ -174,7 +191,7 @@ The result uses a `:User_Requested_Stop` status after an accepted stop request.
 | --- | --- | --- |
 | `printfile` | `""` | Detailed SNOPT output path. |
 | `summfile` | `""` | Summary output path. |
-| `name` | `"Julia"` | Problem name with at most eight characters. |
+| `name` | `"Julia"` | Problem name with at most eight bytes. |
 
 Empty output paths suppress visible files. SNOPT.jl may create a temporary
 summary file internally. The workspace removes that file when it closes.
@@ -189,7 +206,7 @@ first = snopt(objective, gradient!, x0)
 second = snopt(
     objective,
     gradient!,
-    x0;
+    first.x;
     start = "Warm",
     basis = first.basis,
 )
@@ -216,7 +233,7 @@ the same workspace. Use the [Low-level interface](@ref) and reuse one workspace.
 | `sum_inf` | Sum of remaining infeasibilities. |
 | `iterations` | Total minor iterations. |
 | `major_itns` | Total major iterations. |
-| `run_time` | SNOPT-reported solve time in seconds. |
+| `run_time` | SNOPT-reported CPU solve time in seconds. |
 | `memory` | Workspace estimate used by the solve. |
 | `basis` | Basis for a later warm start. |
 

@@ -1,8 +1,6 @@
 name: CI
 
-# Run on pushes to any branch in this repo. Only collaborators can push branches
-# here, so this covers all branches you own while excluding external pull requests
-# (no `pull_request` trigger means forked PRs do not run CI for now).
+# Run on every pushed branch and pull request.
 on:
   push:
     branches: ['**']

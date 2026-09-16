@@ -25,6 +25,12 @@ cleanly (`101`); see [`specs_status_message`](@ref) for the code meanings. Use t
 an alternative to passing options programmatically through [`set_option!`](@ref).
 """
 function read_options(prob::SnoptWorkspace, specsfile::String)
+    return lock(SNOPT_LOCK) do
+        read_options_locked(prob, specsfile)
+    end
+end
+
+function read_options_locked(prob::SnoptWorkspace, specsfile::String)
     require_open_workspace(prob, "read_options")
     isfile(specsfile) ||
         throw(ArgumentError("read_options: specs file not found: $(repr(specsfile))"))
@@ -45,6 +51,28 @@ read_options(prob::AbstractSnoptProblem, specsfile::String) =
 
 function require_dimension(condition::Bool, message::AbstractString)
     condition || throw(DimensionMismatch(String(message)))
+    return nothing
+end
+
+# Julia permits direct mutation of CSC storage. Check it before passing pointers to Fortran.
+function validate_jacobian_storage(J::SparseMatrixCSC)
+    m, n = size(J)
+    length(J.colptr) == n + 1 ||
+        throw(ArgumentError("Jacobian column pointers must have length n + 1"))
+    stored = length(J.nzval)
+    length(J.rowval) == stored ||
+        throw(ArgumentError("Jacobian row indices and values must have equal lengths"))
+    J.colptr[1] == 1 && J.colptr[end] == stored + 1 ||
+        throw(ArgumentError("Jacobian column pointers must start at 1 and end at nnz + 1"))
+    all(p -> 1 <= p <= stored + 1, J.colptr) && issorted(J.colptr) ||
+        throw(ArgumentError("Jacobian column pointers must be nondecreasing and within storage bounds"))
+    all(row -> 1 <= row <= m, J.rowval) ||
+        throw(ArgumentError("Jacobian row indices must be between 1 and $m"))
+    for col in 1:n
+        rows = @view J.rowval[J.colptr[col]:(J.colptr[col + 1] - 1)]
+        all(i -> rows[i - 1] < rows[i], 2:length(rows)) ||
+            throw(ArgumentError("Jacobian row indices must be strictly increasing within each column"))
+    end
     return nothing
 end
 
@@ -79,6 +107,7 @@ end
 
 function snopta_locked!(prob::SnoptA, start::String, name::String, snlog, snstop)
     require_open_workspace(prob.ws, "snopta!")
+    validate_problem_name(name)
     require_dimension(
         prob.n == length(prob.x) == length(prob.xlow) == length(prob.xupp),
         "SnoptA variable arrays must all have length n=$(prob.n)")
@@ -229,6 +258,7 @@ function snoptb_locked!(prob::SnoptWorkspace, start::String, name::String,
                         hs::Vector{Int32}, x::Vector{Float64}, snlog, snstop,
                         nS_in::Int)
     require_open_workspace(prob, "snoptb!")
+    validate_problem_name(name)
     total = n + m
     require_dimension(
         total == length(x) == length(bl) == length(bu),
@@ -243,6 +273,7 @@ function snoptb_locked!(prob::SnoptWorkspace, start::String, name::String,
         length(J.colptr) == n + 1,
         "snOptB Jacobian column pointer must have length n + 1 = $(n + 1); " *
         "got $(length(J.colptr))")
+    validate_jacobian_storage(J)
     prob.iu = Int32[0]
     prob.ru = [0.0]
     prob.x      = copy(x)
@@ -362,6 +393,7 @@ end
 
 function snoptc_locked!(prob::SnoptC, start::String, name::String, snlog, snstop)
     require_open_workspace(prob.ws, "snoptc!")
+    validate_problem_name(name)
     total = prob.n + prob.m_eff
     require_dimension(
         total == length(prob.x) == length(prob.bl) == length(prob.bu),
@@ -377,6 +409,7 @@ function snoptc_locked!(prob::SnoptC, start::String, name::String, snlog, snstop
         length(prob.J.colptr) == prob.n + 1,
         "SnoptC Jacobian column pointer must have length n + 1 = $(prob.n + 1); " *
         "got $(length(prob.J.colptr))")
+    validate_jacobian_storage(prob.J)
     prob.ws.iu = Int32[0]
     prob.ws.ru = [0.0]
     prob.ws.x      = copy(prob.x)

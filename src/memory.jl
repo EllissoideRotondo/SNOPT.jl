@@ -27,23 +27,25 @@ end
 function snmemb(ws::SnoptWorkspace, m::Integer, n::Integer, neJ::Integer,
                 negCon::Integer, nnCon::Integer, nnObj::Integer,
                 nnJac::Integer)
-    require_open_workspace(ws, "snmemb")
-    validate_snmemb_dimensions(m, n, neJ, negCon, nnCon, nnObj, nnJac)
-    info  = Int32[0]
-    miniw = Int32[0]
-    minrw = Int32[0]
-    ccall((:f_snmem, libsnopt7), Cvoid,
-          (Ptr{Cint}, Cint, Cint, Cint, Cint, Cint, Cint, Cint,
-           Ptr{Cint}, Ptr{Cint},
-           Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
-          info,
-          Int(m), Int(n), Int(neJ), Int(negCon), Int(nnCon),
-          Int(nnObj), Int(nnJac),
-          miniw, minrw,
-          ws.iw, ws.leniw, ws.rw, ws.lenrw)
-    memory = SnoptMemory(Int(info[1]), Int(miniw[1]), Int(minrw[1]))
-    ws.status = memory.info
-    return memory
+    return lock(SNOPT_LOCK) do
+        require_open_workspace(ws, "snmemb")
+        validate_snmemb_dimensions(m, n, neJ, negCon, nnCon, nnObj, nnJac)
+        info  = Int32[0]
+        miniw = Int32[0]
+        minrw = Int32[0]
+        ccall((:f_snmem, libsnopt7), Cvoid,
+              (Ptr{Cint}, Cint, Cint, Cint, Cint, Cint, Cint, Cint,
+               Ptr{Cint}, Ptr{Cint},
+               Ptr{Cint}, Cint, Ptr{Cdouble}, Cint),
+              info,
+              Int(m), Int(n), Int(neJ), Int(negCon), Int(nnCon),
+              Int(nnObj), Int(nnJac),
+              miniw, minrw,
+              ws.iw, ws.leniw, ws.rw, ws.lenrw)
+        memory = SnoptMemory(Int(info[1]), Int(miniw[1]), Int(minrw[1]))
+        ws.status = memory.info
+        return memory
+    end
 end
 
 """

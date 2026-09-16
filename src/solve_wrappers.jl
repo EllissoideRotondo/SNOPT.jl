@@ -1,5 +1,13 @@
 # snopt-interface's f_snoptb/f_snoptc/f_snkerb/f_snkerc map their integer start
 # argument as 1 => 'Warm', 2 => 'Hot', anything else => 'Cold'.
+function validate_problem_name(name::String)
+    ncodeunits(name) <= 8 ||
+        throw(ArgumentError("SNOPT problem name must contain at most 8 bytes; got $(ncodeunits(name))"))
+    occursin('\0', name) &&
+        throw(ArgumentError("SNOPT problem name must not contain a null byte"))
+    return name
+end
+
 function start_mode_code(start::AbstractString)::Cint
     key = lowercase(strip(start))
     key == "cold" && return Cint(0)
@@ -31,7 +39,8 @@ A warm start needs the problem's `hs`/`nS` seeded from a previous solve; a hot
 start additionally reuses factorization state that lives *inside the workspace*,
 so it is only valid when this solve reuses the same [`SnoptWorkspace`](@ref) the
 previous solve ran in — with a fresh workspace SNOPT reads uninitialized memory.
-`name` is the ≤8-character problem name SNOPT prints, `snlog` is an optional
+`name` is the problem name SNOPT prints and must contain at most eight bytes.
+`snlog` is an optional
 major-iteration log callback, and `snstop` is an optional major-iteration
 termination callback; both are honored by all three methods, and supplying either
 routes the solve through SNOPT's matching `snKerA`/`snKerB`/`snKerC` kernel.
@@ -54,6 +63,13 @@ reverse-communication kernel. Also reachable through the alias [`snopt!`](@ref).
 """
 function snoptb!(prob::SnoptB; start::String = "Cold", name::String = "Julia",
                  snlog=nothing, snstop=nothing)
+    return lock(SNOPT_LOCK) do
+        snoptb_problem_locked!(prob, start, name, snlog, snstop)
+    end
+end
+
+function snoptb_problem_locked!(prob::SnoptB, start::String, name::String, snlog, snstop)
+    require_open_workspace(prob.ws, "snoptb!")
     nc    = prob.nc
     nnCon = nc
     nnJac = nc > 0 ? prob.n : 0

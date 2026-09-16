@@ -8,6 +8,8 @@ using Aqua
     Aqua.test_all(SNOPT)
 end
 
+include("input_validation.jl")
+
 if !SNOPT.has_snopt()
     @testset "Missing SNOPT library" begin
         @test !SNOPT.has_snopt()
@@ -36,6 +38,8 @@ if !SNOPT.has_snopt()
 end
 
 @info "Running tests with $(SNOPT.libsnopt7)"
+
+include("workspace_safety.jl")
 
 @testset "Test examples" begin
     include("snopt_tests.jl")

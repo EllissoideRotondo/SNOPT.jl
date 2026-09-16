@@ -15,7 +15,7 @@ as the main Julia entry point.
     Obtain a SNOPT license and a compatible `libsnopt7` shared library.
     The Julia package does not include either item.
 
-## Choose an interface
+## Interfaces
 
 | Need | Interface |
 | --- | --- |
@@ -28,7 +28,9 @@ Use
 [OptimizationSNOPT.jl](https://EllissoideRotondo.github.io/OptimizationSNOPT.jl/stable/)
 for Optimization.jl problems and automatic differentiation.
 
-## Quick start
+## Getting started
+
+Complete [Installation](@ref) before running this example.
 
 ```julia
 using SNOPT
@@ -51,21 +53,22 @@ result = snopt(
 )
 
 result.status_symbol
-result.x
-result.objective
+result.x          # approximately [1.0, 2.0]
+result.objective  # approximately 0.0
 ```
 
-## Continue
+## Documentation
 
-1. Follow [Installation](@ref).
-2. Read the [High-level interface](@ref).
-3. Run the [Examples](@ref).
-4. Use the [Low-level interface](@ref) only when needed.
-5. Check the [API reference](@ref) for exact signatures.
+- [Installation](@ref) covers package and SNOPT library setup.
+- [High-level interface](@ref) documents the recommended `snopt` function.
+- [Examples](@ref) provides complete unconstrained and constrained problems.
+- [Low-level interface](@ref) covers manual workspaces and native problem types.
+- [API reference](@ref) lists public types and functions.
 
 ## Concurrency
 
-SNOPT owns one global Fortran workspace per process. SNOPT.jl serializes
-workspace creation and solves. Threaded solves are safe, but run sequentially.
+SNOPT owns one active Fortran workspace per process.
+Concurrent calls to [`snopt`](@ref) are serialized, so threaded solves run sequentially.
+Manage low-level workspaces from one task; creating a workspace closes the previous one.
 
 Use separate Julia processes for parallel solves.

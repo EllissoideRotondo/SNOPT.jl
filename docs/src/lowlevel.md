@@ -17,10 +17,11 @@ The workspace owns SNOPT's work arrays and active Fortran session.
 Always close a manually managed workspace:
 
 ```julia
+using SNOPT
+
 workspace = initialize("", "")
 try
     set_option!(workspace, "Major print level", 0)
-    # Build and solve a low-level problem here.
 finally
     close(workspace)
 end
@@ -31,12 +32,13 @@ Prefer the `do` form because it closes the workspace after errors:
 ```julia
 initialize("", "") do workspace
     set_option!(workspace, "Major print level", 0)
-    # Build and solve a low-level problem here.
 end
 ```
 
 SNOPT owns one active workspace per process. Calling `initialize` closes the
-previous active workspace. All workspace operations and solves are serialized.
+previous active workspace. Workspace creation and solves are serialized.
+The `do` block does not hold the lock across user code.
+Manage low-level workspaces from one task, including option changes and cleanup.
 
 Do not create several workspaces for parallel solves. Use separate Julia
 processes instead.

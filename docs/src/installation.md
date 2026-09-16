@@ -6,22 +6,22 @@ CurrentModule = SNOPT
 
 ## Requirements
 
-Install Julia 1.10 or later. Obtain a licensed SNOPT 7 shared library.
+Install Julia 1.10 or later. Obtain a licensed SNOPT 7.7 shared library.
 The library must include SNOPT's `snopt-interface` C functions.
 
-SNOPT.jl targets SNOPT 7.7. Other major versions may use different workspace
-layouts. A mismatched version can report incorrect iteration or timing data.
+SNOPT.jl reads iteration and timing data from the SNOPT 7.7 workspace layout.
+Other versions may use different layouts and report incorrect statistics.
 
 ## Add the package
 
-Use your Julia package registry when it contains SNOPT:
+For a registry installation, run this in your Julia environment:
 
 ```julia
 import Pkg
 Pkg.add("SNOPT")
 ```
 
-Install the current source version with:
+To install from source:
 
 ```julia
 import Pkg
@@ -70,10 +70,17 @@ before accepting a library.
 
 ## Fallback search paths
 
-When `SNOPTDIR` is unset, SNOPT.jl checks standard platform search paths.
+If `SNOPTDIR` is unset or unusable, SNOPT.jl checks platform library paths next.
+
+Linux:
 
 ```bash
 export LD_LIBRARY_PATH=/path/to/snopt/lib:$LD_LIBRARY_PATH
+```
+
+macOS:
+
+```bash
 export DYLD_LIBRARY_PATH=/path/to/snopt/lib:$DYLD_LIBRARY_PATH
 ```
 
@@ -85,7 +92,7 @@ library discovery.
 
 ## Verify the setup
 
-Run:
+Run from the environment where you installed SNOPT:
 
 ```bash
 julia -e 'using SNOPT; @assert SNOPT.has_snopt(); println(SNOPT.libsnopt7)'
@@ -101,7 +108,8 @@ SNOPT.libsnopt7
 SNOPT.find_snopt_lib()
 ```
 
-`find_snopt_lib()` repeats the search. It helps diagnose path or symbol errors.
+`find_snopt_lib()` repeats the search and returns a path or an empty string.
+It does not update `SNOPT.libsnopt7`. Restart Julia after correcting the library setup.
 
 ## Platform notes
 

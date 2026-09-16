@@ -29,14 +29,8 @@ copy_cdouble_vector(ptr::Ptr{Cdouble}, len::Integer) =
 copy_cint32_vector(ptr::Ptr{Cint}, len::Integer) =
     len <= 0 ? Int32[] : copy(unsafe_wrap(Array, ptr, Int(len)))
 
-# Exception plumbing has two deliberate layers. Each callback closure built by
-# make_objfun/make_confun/make_usrfun_*/make_snlog catches errors raised by the
-# user's Julia functions and records them in its own SnoptCallbackState (carried
-# by StatefulCallback). The @cfunction trampolines below add a second net: they
-# catch anything that escapes the closure or fails while resolving the
-# active-callback registry, recording it in ActiveSnopt*Callbacks.exception.
-# Both layers are rethrown on the Julia side after the ccall returns; neither
-# may ever let an exception unwind through the Fortran frames.
+# Closures record user errors; trampolines also catch callback dispatch errors.
+# Both layers rethrow after ccall. Exceptions must never unwind through Fortran.
 mutable struct SnoptCallbackState
     exception::Any
 end
@@ -170,17 +164,22 @@ end
 
 function with_active_snopt_callbacks(f::Function, ws::SnoptWorkspace,
                                      callbacks::AbstractActiveSnoptCallbacks)
-    old_iu = ws.iu
-    old_leniu = ws.leniu
-    callback_id = register_active_snopt_callbacks!(callbacks)
-    ws.iu = Int32[callback_id]
-    ws.leniu = 1
-    try
-        return f()
-    finally
-        unregister_active_snopt_callbacks!(callback_id)
-        ws.iu = old_iu
-        ws.leniu = old_leniu
+    return lock(SNOPT_LOCK) do
+        require_idle_snopt("snopt!")
+        old_iu = ws.iu
+        old_leniu = ws.leniu
+        callback_id = register_active_snopt_callbacks!(callbacks)
+        ws.iu = Int32[callback_id]
+        ws.leniu = 1
+        _SNOPT_SOLVE_ACTIVE[] = true
+        try
+            return f()
+        finally
+            _SNOPT_SOLVE_ACTIVE[] = false
+            unregister_active_snopt_callbacks!(callback_id)
+            ws.iu = old_iu
+            ws.leniu = old_leniu
+        end
     end
 end
 

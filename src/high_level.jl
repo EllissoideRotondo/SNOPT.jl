@@ -16,13 +16,15 @@ end
 function float_vector(values, name::AbstractString)
     values === nothing && throw(ArgumentError("$name must be provided"))
     values isa Number && throw(ArgumentError("$name must be a vector, not a scalar"))
-    return reject_nan(snopt_bound_value.(collect(values)), name)
+    vector = collect(values)
+    vector isa AbstractVector || throw(ArgumentError("$name must be one-dimensional"))
+    return reject_nan(snopt_bound_value.(vector), name)
 end
 
 function bound_vector(values, n::Int, default::Float64, name::AbstractString)
     values === nothing && return fill(default, n)
     values isa Number && return reject_nan(fill(snopt_bound_value(values), n), name)
-    vector = reject_nan(snopt_bound_value.(collect(values)), name)
+    vector = float_vector(values, name)
     length(vector) == n ||
         throw(ArgumentError("$name must have length $n; got $(length(vector))"))
     return vector
@@ -52,6 +54,7 @@ end
 function jacobian_sparsity32(J::SparseMatrixCSC, nc::Int, n::Int)
     size(J) == (nc, n) ||
         throw(ArgumentError("J must have size ($nc, $n); got $(size(J))"))
+    validate_jacobian_storage(J)
     return SparseMatrixCSC{Float64,Int32}(
         nc, n, Int32.(J.colptr), Int32.(J.rowval), Float64.(J.nzval))
 end
@@ -74,6 +77,8 @@ function prepare_constraint_data(eval_con, eval_jac, lcon, ucon)
     ucon_vector = float_vector(ucon, "ucon")
     length(lcon_vector) == length(ucon_vector) ||
         throw(ArgumentError("lcon and ucon must have the same length"))
+    all(lcon_vector .<= ucon_vector) ||
+        throw(ArgumentError("each lcon bound must be <= its ucon bound"))
     if isempty(lcon_vector)
         no_callbacks ||
             throw(ArgumentError("constraint callbacks were provided, but lcon/ucon are empty"))
@@ -173,7 +178,7 @@ fills derivatives in the column-major storage order of `J`.
 - `start`: `"Cold"` or `"Warm"`. A warm start requires `basis`.
 - `basis`: [`SnoptBasis`](@ref) from a compatible previous result.
 - `printfile`, `summfile`: SNOPT output paths. Empty strings suppress output.
-- `name`: Problem name with at most eight characters.
+- `name`: Problem name with at most eight bytes.
 
 The function rejects `start = "Hot"`. A hot start needs one reused low-level
 workspace. See the [Low-level interface](@ref).
@@ -202,8 +207,11 @@ function snopt(eval_obj, eval_grad,
     n > 0 || throw(ArgumentError("x0 must contain at least one variable"))
     all(isfinite, x0_vector) ||
         throw(ArgumentError("x0 must contain only finite values"))
+    validate_problem_name(name)
     xlow = bound_vector(lb, n, -SNOPT_INF, "lb")
     xupp = bound_vector(ub, n, SNOPT_INF, "ub")
+    all(xlow .<= xupp) ||
+        throw(ArgumentError("each lb bound must be <= its ub bound"))
     nc, lcon_vector, ucon_vector =
         prepare_constraint_data(eval_con, eval_jac, lcon, ucon)
     m_eff = nc > 0 ? nc : 1
@@ -232,6 +240,7 @@ end
 # with; without it SNOPT would restart from a zeroed basis, which is a cold
 # start wearing a different name.
 function prepare_start_basis(basis, start::AbstractString, n::Int, m_eff::Int)
+    start_mode_code(start)
     key = lowercase(strip(start))
     if key == "cold"
         basis === nothing ||
@@ -261,6 +270,12 @@ function prepare_start_basis(basis, start::AbstractString, n::Int, m_eff::Int)
     length(basis.hs) == n + m_eff ||
         throw(ArgumentError("basis hs must have length n + m = $(n + m_eff); " *
                             "got $(length(basis.hs))"))
+    all(state -> 0 <= state <= 3, basis.hs) ||
+        throw(ArgumentError("warm-start basis hs entries must be SNOPT states between 0 and 3"))
+    superbasics = count(==(Int32(2)), basis.hs)
+    basis.nS == superbasics ||
+        throw(ArgumentError("basis nS must equal the number of superbasic hs entries; " *
+                            "got nS = $(basis.nS) and $superbasics superbasic entries"))
     return copy(basis.hs), basis.nS
 end
 

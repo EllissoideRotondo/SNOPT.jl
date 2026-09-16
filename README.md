@@ -15,21 +15,21 @@ for Optimization.jl problems and automatic differentiation.
 ## Requirements
 
 - Julia 1.10 or later.
-- A licensed SNOPT 7 shared library.
+- A licensed SNOPT 7.7 shared library.
 - SNOPT's `snopt-interface` C functions in that library.
 
 SNOPT.jl does not include SNOPT or a SNOPT license.
 
-## Install
+## Installation
 
-Install the registered package when it is available in your registry:
+For a registry installation, run this in your Julia environment:
 
 ```julia
 import Pkg
 Pkg.add("SNOPT")
 ```
 
-Install the current source version with:
+To install from source:
 
 ```julia
 import Pkg
@@ -48,7 +48,7 @@ Windows PowerShell uses this command:
 $env:SNOPTDIR = "C:\path\to\snopt\lib"
 ```
 
-Verify the complete setup:
+Verify library discovery from the environment where you installed SNOPT:
 
 ```bash
 julia -e 'using SNOPT; @assert SNOPT.has_snopt(); println(SNOPT.libsnopt7)'
@@ -57,7 +57,7 @@ julia -e 'using SNOPT; @assert SNOPT.has_snopt(); println(SNOPT.libsnopt7)'
 See the [installation guide](https://EllissoideRotondo.github.io/SNOPT.jl/stable/installation/)
 for library names, search paths, licensing, and platform limits.
 
-## Quick start
+## Getting started
 
 The high-level [`snopt`](https://EllissoideRotondo.github.io/SNOPT.jl/stable/interface/)
 function manages the workspace and returns a `SnoptResult`.
@@ -83,26 +83,28 @@ result = snopt(
 )
 
 result.status_symbol
-result.x
-result.objective
+result.x          # approximately [1.0, 2.0]
+result.objective  # approximately 0.0
 ```
 
 The gradient callback must fill every entry of `gradient`. It may return any
 value because SNOPT uses the mutated array.
 
-## Run the examples
+## Examples
 
-Run these commands from the repository root:
+With Julia and the licensed library installed, run these commands from the repository root:
 
 ```bash
 julia --project=. examples/unconstrained.jl
 julia --project=. examples/hs71.jl
 ```
 
-The second example includes bounds, constraints, and a constraint Jacobian.
+The Hock-Schittkowski 71 example includes bounds and constraints.
+It also supplies a constraint Jacobian.
 A Jacobian is the matrix of constraint derivatives.
+Both scripts write a solver log beside the script, with the extension `.out`.
 
-## Main interfaces
+## Interfaces
 
 | Need | Interface |
 | --- | --- |
@@ -116,12 +118,13 @@ contains callback contracts, warm starts, monitoring, and low-level examples.
 
 ## Concurrency
 
-SNOPT owns one global Fortran workspace per process. SNOPT.jl serializes
-workspace creation and solves. Threaded solves are safe, but run sequentially.
+SNOPT owns one active Fortran workspace per process.
+Concurrent calls to `snopt` are serialized, so threaded solves run sequentially.
+Manage low-level workspaces from one task; creating a workspace closes the previous one.
 
 Use separate Julia processes for parallel solves.
 
-## Test
+## Testing
 
 Run the test suite from the repository root:
 
@@ -154,3 +157,5 @@ This package draws on prior Julia wrappers:
 - [snopt/SNOPT7.jl](https://github.com/snopt/SNOPT7.jl)
 - [byuflowlab/Snopt.jl](https://github.com/byuflowlab/Snopt.jl)
 - [Yuricst/joptimise](https://github.com/Yuricst/joptimise)
+
+OpenAI Codex assisted with documentation, concurrency safeguards, tests, and code review.

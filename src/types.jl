@@ -48,7 +48,7 @@ mutable struct SnoptWorkspace
                    Int32[0], [0.0],
                    Float64[], Float64[], 0.0,
                    0, 0.0, 0, 0, 0.0, 0)
-        finalizer(free!, prob)
+        finalizer(gc_finalize_workspace!, prob)
         prob
     end
 end

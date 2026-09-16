@@ -12,6 +12,8 @@ julia --project=. examples/hs71.jl
 ```
 
 Both commands require a working licensed SNOPT library.
+Each script writes a solver log beside the script: `unconstrained.out` or `hs71.out`.
+The examples below suppress those files by omitting `printfile`.
 
 ## Unconstrained quadratic
 

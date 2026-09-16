@@ -22,6 +22,8 @@ These rules apply to SNOPT.jl and OptimizationSNOPT.jl work.
 - Keep definitions, option names, and table columns consistent.
 - Avoid promotional language, filler, and unexplained jargon.
 - Prefer short examples that users can copy and run.
+- Keep comments for non-obvious constraints, safety conditions, and design reasons.
+- Remove comments that restate names, types, or control flow.
 
 Code, equations, links, and API identifiers do not follow the sentence limit.
 Longer sentences are acceptable when splitting them would reduce accuracy.
