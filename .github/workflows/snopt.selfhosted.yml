@@ -1,0 +1,67 @@
+name: SNOPT Tests
+
+on:
+  push:
+    branches: ['**']
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: snopt-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Julia ${{ matrix.julia }} / SNOPT
+
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - deimos
+      - snopt
+
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        julia:
+          - '1.10'
+          - '1'
+
+    env:
+      SNOPTDIR: /opt/snopt
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify SNOPT library is mounted
+        run: |
+          test -r /opt/snopt/libsnopt7.so
+          ldd /opt/snopt/libsnopt7.so
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.julia }}
+
+      - uses: julia-actions/cache@v2
+
+      - name: Instantiate
+        run: |
+          julia --project=. -e 'using Pkg; Pkg.instantiate()'
+
+      - name: Verify SNOPT.jl detects SNOPT
+        run: |
+          julia --project=. -e '
+            using SNOPT
+            println("SNOPT library: ", SNOPT.libsnopt7)
+            @assert SNOPT.has_snopt()
+          '
+
+      - name: Run tests
+        run: |
+          julia --project=. -e 'using Pkg; Pkg.test()'
