@@ -8,25 +8,32 @@ SNOPT.jl is an unofficial Julia interface to
 [SNOPT](https://ccom.ucsd.edu/~optimizers/solvers/snopt/). SNOPT solves smooth,
 constrained nonlinear optimization problems.
 
-The package provides three low-level interfaces. It also provides [`snopt`](@ref)
-as the main Julia entry point.
+The package provides [`snopt`](@ref) as its main Julia entry point and three
+low-level interfaces for native SNOPT features.
 
 !!! note "Commercial solver required"
     Obtain a SNOPT license and a compatible `libsnopt7` shared library.
     The Julia package does not include either item.
 
-## Interfaces
+## Choosing an interface
 
 | Need | Interface |
 | --- | --- |
-| Managed workspace and split callbacks | [`snopt`](@ref) |
-| Separate objective and constraint callbacks | [`SnoptB`](@ref) |
-| One combined callback | [`SnoptC`](@ref) |
-| Stacked rows and separate derivative structure | [`SnoptA`](@ref) |
+| Direct solve with user derivatives | [`snopt`](@ref) |
+| Optimization.jl and automatic differentiation | OptimizationSNOPT.jl |
+| Linear rows or finite-difference derivatives | [`SnoptA`](@ref) |
+| Separate low-level objective and constraint callbacks | [`SnoptB`](@ref) |
+| One combined low-level callback | [`SnoptC`](@ref) |
+| Reuse one workspace for a true hot start | [`SnoptA`](@ref), [`SnoptB`](@ref), or [`SnoptC`](@ref) |
 
 Use
-[OptimizationSNOPT.jl](https://EllissoideRotondo.github.io/OptimizationSNOPT.jl/dev/)
+[OptimizationSNOPT.jl](https://github.com/EllissoideRotondo/OptimizationSNOPT.jl)
 for Optimization.jl problems and automatic differentiation.
+
+Use a low-level interface only when [`snopt`](@ref) cannot represent a required
+native feature. [`SnoptA`](@ref) supports explicit linear rows and lets SNOPT
+estimate missing derivatives. All low-level interfaces can reuse one workspace
+for a true hot start.
 
 ## Getting started
 
@@ -61,6 +68,7 @@ result.objective  # approximately 0.0
 - [High-level interface](@ref) documents the recommended `snopt` function.
 - [Examples](@ref) provides complete unconstrained and constrained problems.
 - [Low-level interface](@ref) covers manual workspaces and native problem types.
+- [Troubleshooting](@ref) covers library discovery and platform errors.
 - [API reference](@ref) lists public types and functions.
 
 ## Concurrency

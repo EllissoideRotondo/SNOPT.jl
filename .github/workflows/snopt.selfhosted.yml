@@ -21,7 +21,6 @@ jobs:
       - self-hosted
       - linux
       - x64
-      - deimos
       - snopt
 
     timeout-minutes: 30
@@ -65,3 +64,20 @@ jobs:
       - name: Run tests
         run: |
           julia --project=. -e 'using Pkg; Pkg.test()'
+
+      - name: Run examples
+        run: |
+          julia --project=. examples/unconstrained.jl
+          julia --project=. examples/hs71.jl
+
+      - name: Validate solver documentation
+        if: matrix.julia == '1'
+        env:
+          SNOPT_DOCTESTS: 'true'
+          SNOPT_DOCS_DEPLOY: 'false'
+        run: |
+          julia --project=docs -e '
+            using Pkg
+            Pkg.develop(PackageSpec(path=pwd()))
+            Pkg.instantiate()'
+          julia --project=docs docs/make.jl

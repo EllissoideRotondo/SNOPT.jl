@@ -3,12 +3,10 @@
 [![CI](https://github.com/EllissoideRotondo/SNOPT.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/EllissoideRotondo/SNOPT.jl/actions/workflows/CI.yml)
 [![docs](https://img.shields.io/badge/docs-dev-blue.svg)](https://EllissoideRotondo.github.io/SNOPT.jl/dev/)
 
-SNOPT.jl is an unofficial Julia interface to
-[SNOPT](https://ccom.ucsd.edu/~optimizers/solvers/snopt/). SNOPT solves large,
-constrained nonlinear optimization problems.
-
-Use this package for direct access to SNOPT's `snOptA`, `snOptB`, and `snOptC`
-interfaces. Use
+SNOPT.jl provides direct Julia access to
+[SNOPT](https://ccom.ucsd.edu/~optimizers/solvers/snopt/), which solves large,
+constrained nonlinear optimization problems. Use the high-level `snopt`
+function for most direct solves. Use
 [OptimizationSNOPT.jl](https://github.com/EllissoideRotondo/OptimizationSNOPT.jl)
 for Optimization.jl problems and automatic differentiation.
 
@@ -108,10 +106,12 @@ Both scripts write a solver log beside the script, with the extension `.out`.
 
 | Need | Interface |
 | --- | --- |
-| Managed workspace and split callbacks | `snopt` |
-| Separate objective and constraint callbacks | `SnoptB` |
-| One combined callback | `SnoptC` |
-| Stacked rows and separate derivative structure | `SnoptA` |
+| Most direct SNOPT problems | `snopt` |
+| Optimization.jl and automatic differentiation | OptimizationSNOPT.jl |
+| Linear rows or finite-difference derivatives | `SnoptA` |
+| Separate low-level objective and constraint callbacks | `SnoptB` |
+| One combined low-level callback | `SnoptC` |
+| Reuse one workspace for a true hot start | `SnoptA`, `SnoptB`, or `SnoptC` |
 
 The [documentation](https://EllissoideRotondo.github.io/SNOPT.jl/dev/)
 contains callback contracts, warm starts, monitoring, and low-level examples.

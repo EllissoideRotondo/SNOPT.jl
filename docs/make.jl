@@ -18,17 +18,20 @@ makedocs(;
         "High-level interface" => "interface.md",
         "Low-level interface" => "lowlevel.md",
         "Examples" => "examples.md",
+        "Troubleshooting" => "troubleshooting.md",
         "API reference" => "api.md",
     ],
     # Every exported symbol must appear in an @docs block.
     checkdocs = :exports,
-    # The SNOPT shared library is unavailable in CI, so no solves run during the
-    # build; doctests are disabled because their output depends on the solver.
-    doctest = false,
+    # Hosted CI renders the docs without SNOPT. The self-hosted solver job sets
+    # SNOPT_DOCTESTS=true and executes the solver examples.
+    doctest = get(ENV, "SNOPT_DOCTESTS", "false") == "true",
 )
 
-deploydocs(;
-    repo = "github.com/EllissoideRotondo/SNOPT.jl",
-    devbranch = "main",
-    push_preview = true,
-)
+if get(ENV, "SNOPT_DOCS_DEPLOY", "true") == "true"
+    deploydocs(;
+        repo = "github.com/EllissoideRotondo/SNOPT.jl",
+        devbranch = "main",
+        push_preview = true,
+    )
+end
