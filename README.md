@@ -1,7 +1,7 @@
 # SNOPT.jl
 
 [![CI](https://github.com/EllissoideRotondo/SNOPT.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/EllissoideRotondo/SNOPT.jl/actions/workflows/CI.yml)
-[![docs](https://img.shields.io/badge/docs-stable-blue.svg)](https://EllissoideRotondo.github.io/SNOPT.jl/stable/)
+[![docs](https://img.shields.io/badge/docs-dev-blue.svg)](https://EllissoideRotondo.github.io/SNOPT.jl/dev/)
 
 SNOPT.jl is an unofficial Julia interface to
 [SNOPT](https://ccom.ucsd.edu/~optimizers/solvers/snopt/). SNOPT solves large,
@@ -15,10 +15,10 @@ for Optimization.jl problems and automatic differentiation.
 ## Requirements
 
 - Julia 1.10 or later.
-- A licensed SNOPT 7.7 shared library.
-- SNOPT's `snopt-interface` C functions in that library.
+- A licensed SNOPT 7.7 shared library that includes the C API provided by
+  [`snopt-interface`](https://github.com/snopt/snopt-interface).
 
-SNOPT.jl does not include SNOPT or a SNOPT license.
+You must obtain the SNOPT library and license separately.
 
 ## Installation
 
@@ -54,12 +54,12 @@ Verify library discovery from the environment where you installed SNOPT:
 julia -e 'using SNOPT; @assert SNOPT.has_snopt(); println(SNOPT.libsnopt7)'
 ```
 
-See the [installation guide](https://EllissoideRotondo.github.io/SNOPT.jl/stable/installation/)
+See the [installation guide](https://EllissoideRotondo.github.io/SNOPT.jl/dev/installation/)
 for library names, search paths, licensing, and platform limits.
 
 ## Getting started
 
-The high-level [`snopt`](https://EllissoideRotondo.github.io/SNOPT.jl/stable/interface/)
+The high-level [`snopt`](https://EllissoideRotondo.github.io/SNOPT.jl/dev/interface/)
 function manages the workspace and returns a `SnoptResult`.
 
 ```julia
@@ -113,7 +113,7 @@ Both scripts write a solver log beside the script, with the extension `.out`.
 | One combined callback | `SnoptC` |
 | Stacked rows and separate derivative structure | `SnoptA` |
 
-The [documentation](https://EllissoideRotondo.github.io/SNOPT.jl/stable/)
+The [documentation](https://EllissoideRotondo.github.io/SNOPT.jl/dev/)
 contains callback contracts, warm starts, monitoring, and low-level examples.
 
 ## Concurrency
@@ -158,4 +158,5 @@ This package draws on prior Julia wrappers:
 - [byuflowlab/Snopt.jl](https://github.com/byuflowlab/Snopt.jl)
 - [Yuricst/joptimise](https://github.com/Yuricst/joptimise)
 
-OpenAI Codex assisted with documentation, concurrency safeguards, tests, and code review.
+OpenAI Codex and Anthropic Claude Code assisted with documentation, concurrency
+safeguards, tests, and code review.

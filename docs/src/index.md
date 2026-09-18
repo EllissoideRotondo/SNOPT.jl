@@ -25,7 +25,7 @@ as the main Julia entry point.
 | Stacked rows and separate derivative structure | [`SnoptA`](@ref) |
 
 Use
-[OptimizationSNOPT.jl](https://EllissoideRotondo.github.io/OptimizationSNOPT.jl/stable/)
+[OptimizationSNOPT.jl](https://EllissoideRotondo.github.io/OptimizationSNOPT.jl/dev/)
 for Optimization.jl problems and automatic differentiation.
 
 ## Getting started

@@ -6,8 +6,9 @@ CurrentModule = SNOPT
 
 ## Requirements
 
-Install Julia 1.10 or later. Obtain a licensed SNOPT 7.7 shared library.
-The library must include SNOPT's `snopt-interface` C functions.
+Install Julia 1.10 or later. Obtain a licensed SNOPT 7.7 shared library that
+includes the C API provided by
+[snopt-interface](https://github.com/snopt/snopt-interface).
 
 SNOPT.jl reads iteration and timing data from the SNOPT 7.7 workspace layout.
 Other versions may use different layouts and report incorrect statistics.
