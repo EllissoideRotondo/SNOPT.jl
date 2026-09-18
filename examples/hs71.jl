@@ -45,8 +45,8 @@ function jacobian!(jac, x)
 end
 
 J = sparse(
-    Int32[1, 2, 1, 2, 1, 2, 1, 2],
-    Int32[1, 1, 2, 2, 3, 3, 4, 4],
+    [1, 2, 1, 2, 1, 2, 1, 2],
+    [1, 1, 2, 2, 3, 3, 4, 4],
     ones(8),
     2,
     4,
@@ -70,7 +70,6 @@ result = snopt(
     printfile = joinpath(@__DIR__, "hs71.out"),
 )
 
-println()
-println("status = ", result.status, " (", result.status_symbol, ")")
-println("objective = ", result.objective)
-println("x = ", result.x)
+@assert result.status_symbol == :Solve_Succeeded
+@assert isapprox(result.objective, 17.014017; atol = 1.0e-5)
+@assert isapprox(result.x, [1.0, 4.743, 3.821, 1.379]; atol = 1.0e-3)

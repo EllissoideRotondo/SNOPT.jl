@@ -20,7 +20,7 @@ The examples below suppress those files by omitting `printfile`.
 This problem minimizes ``(x_1 - 1)^2 + (x_2 - 2)^2``. Its solution is
 ``x = (1, 2)`` with objective zero.
 
-```julia
+```jldoctest unconstrained
 using SNOPT
 
 objective(x) = (x[1] - 1.0)^2 + (x[2] - 2.0)^2
@@ -31,11 +31,6 @@ function gradient!(gradient, x)
     return nothing
 end
 
-function progress(event::SnoptMajorLog)
-    println("major $(event.major_iter): objective = $(event.objective)")
-    return true
-end
-
 result = snopt(
     objective,
     gradient!,
@@ -43,16 +38,16 @@ result = snopt(
     lb = -10.0,
     ub = 10.0,
     options = ["Major print level" => 0],
-    snlog = progress,
 )
 
-println("status = ", result.status_symbol)
-println("objective = ", result.objective)
-println("x = ", result.x)
+@assert result.status_symbol == :Solve_Succeeded
+@assert isapprox(result.objective, 0.0; atol = 1.0e-8)
+@assert isapprox(result.x, [1.0, 2.0]; atol = 1.0e-6)
+
+# output
 ```
 
-`gradient!` fills both gradient entries. `progress` returns `true` so SNOPT
-continues after each major iteration.
+`gradient!` fills both gradient entries.
 
 ## Constrained problem
 
@@ -67,7 +62,7 @@ subject to  x1*x2*x3*x4 >= 25
 
 The known objective is approximately `17.014017`.
 
-```julia
+```jldoctest hs71
 using SNOPT
 using SparseArrays
 
@@ -100,8 +95,8 @@ function jacobian!(nonzeros, x)
 end
 
 J = sparse(
-    Int32[1, 2, 1, 2, 1, 2, 1, 2],
-    Int32[1, 1, 2, 2, 3, 3, 4, 4],
+    [1, 2, 1, 2, 1, 2, 1, 2],
+    [1, 1, 2, 2, 3, 3, 4, 4],
     ones(8),
     2,
     4,
@@ -121,9 +116,11 @@ result = snopt(
     options = ["Major print level" => 0],
 )
 
-println("status = ", result.status_symbol)
-println("objective = ", result.objective)
-println("x = ", result.x)
+@assert result.status_symbol == :Solve_Succeeded
+@assert isapprox(result.objective, 17.014017; atol = 1.0e-5)
+@assert isapprox(result.x, [1.0, 4.743, 3.821, 1.379]; atol = 1.0e-3)
+
+# output
 ```
 
 The Jacobian is dense, but `J` makes the storage order explicit.
