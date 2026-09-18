@@ -15,7 +15,7 @@ Other versions may use different layouts and report incorrect statistics.
 
 ## Add the package
 
-For a registry installation, run this in your Julia environment:
+Install SNOPT.jl with Julia's package manager:
 
 ```julia
 import Pkg

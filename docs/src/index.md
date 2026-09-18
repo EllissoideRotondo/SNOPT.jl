@@ -30,8 +30,6 @@ for Optimization.jl problems and automatic differentiation.
 
 ## Getting started
 
-Complete [Installation](@ref) before running this example.
-
 ```julia
 using SNOPT
 

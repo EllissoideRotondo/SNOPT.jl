@@ -22,7 +22,7 @@ You must obtain the SNOPT library and license separately.
 
 ## Installation
 
-For a registry installation, run this in your Julia environment:
+Install SNOPT.jl with Julia's package manager:
 
 ```julia
 import Pkg
