@@ -35,8 +35,8 @@ Before starting Julia, set `SNOPTDIR` to the directory that contains the library
 export SNOPTDIR=/path/to/snopt/lib
 ```
 
-Check that SNOPT.jl finds the library (add `--project=...` if you installed it in a
-project environment):
+Check that SNOPT.jl finds the library. For a package installed in a project
+environment, add `--project=/path/to/project` after `julia`.
 
 ```bash
 julia -e 'using SNOPT; @assert SNOPT.has_snopt(); println(SNOPT.libsnopt7)'
@@ -56,21 +56,26 @@ gives the search order, the supported platforms and help for a library that does
 
 Minimize `(x₁ - 1)² + (x₂ - 2)²` with `-10 ≤ xᵢ ≤ 10`:
 
-```julia
-using SNOPT
+```julia-repl
+julia> using SNOPT
 
-objective(x) = (x[1] - 1.0)^2 + (x[2] - 2.0)^2
+julia> objective(x) = (x[1] - 1.0)^2 + (x[2] - 2.0)^2;
 
-function gradient!(g, x)
-    g[1] = 2.0 * (x[1] - 1.0)
-    g[2] = 2.0 * (x[2] - 2.0)
-    return nothing
-end
+julia> function gradient!(g, x)
+           g[1] = 2.0 * (x[1] - 1.0)
+           g[2] = 2.0 * (x[2] - 2.0)
+           return nothing
+       end;
 
-result = snopt(objective, gradient!, [0.0, 0.0]; lb = -10.0, ub = 10.0)
+julia> result = snopt(objective, gradient!, [0.0, 0.0]; lb = -10.0, ub = 10.0);
 
-result.status   # SnoptStatus.Optimal = 1
-result.x               # ≈ [1.0, 2.0]
+julia> result.status
+SnoptStatus.Optimal = 1
+
+julia> round.(result.x; digits = 6)
+2-element Vector{Float64}:
+ 1.0
+ 2.0
 ```
 
 `gradient!` must write every entry of `g`. For nonlinear constraints, add the
@@ -80,16 +85,11 @@ shows.
 
 ## Documentation
 
-| Task | Function | Guide |
-| --- | --- | --- |
-| Install SNOPT.jl and fix a library that does not load | `SNOPT.has_snopt` | [Installation](https://EllissoideRotondo.github.io/SNOPT.jl/dev/installation/) |
-| Solve a problem with bounds and constraints | `snopt` | [Getting started](https://EllissoideRotondo.github.io/SNOPT.jl/dev/getting_started/) |
-| Set tolerances, limits and output files | `options` keyword | [Set solver options](https://EllissoideRotondo.github.io/SNOPT.jl/dev/howto/options/) |
-| Print progress or stop a solve early | `snlog`, `snstop` keywords | [Monitor and stop a solve](https://EllissoideRotondo.github.io/SNOPT.jl/dev/howto/monitoring/) |
-| Start from a previous solution | `start`, `basis` keywords | [Warm and hot starts](https://EllissoideRotondo.github.io/SNOPT.jl/dev/howto/warm_start/) |
-| Use finite differences or linear rows | `SnoptA`, `snopta!` | [Low-level interface](https://EllissoideRotondo.github.io/SNOPT.jl/dev/howto/lowlevel/) |
-| Understand status codes and iterations | `SnoptStatus` | [Solver concepts](https://EllissoideRotondo.github.io/SNOPT.jl/dev/concepts/) |
-| Look up a function or a type | | [API reference](https://EllissoideRotondo.github.io/SNOPT.jl/dev/api/) |
+The [documentation](https://EllissoideRotondo.github.io/SNOPT.jl/dev/) starts with a
+[tutorial](https://EllissoideRotondo.github.io/SNOPT.jl/dev/getting_started/) on bounds
+and nonlinear constraints. It then gives how-to guides for solver options, monitoring,
+warm and hot starts and the low-level interface, explains the SNOPT terms and status
+codes, and ends with the API reference.
 
 ## Limits
 
@@ -100,18 +100,6 @@ shows.
 
 [Solver concepts](https://EllissoideRotondo.github.io/SNOPT.jl/dev/concepts/#Limits)
 lists all limits.
-
-## Build the documentation
-
-From the repository root:
-
-```bash
-julia --project=docs -e 'using Pkg; Pkg.instantiate()'
-SNOPT_DOCS_DEPLOY=false julia --project=docs docs/make.jl
-```
-
-The build runs the examples in the manual when it finds the SNOPT library; set
-`SNOPT_DOCTESTS=false` to skip them. The pages are written to `docs/build/`.
 
 ## License
 

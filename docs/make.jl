@@ -23,7 +23,11 @@ makedocs(;
             "Low-level interface" => "howto/lowlevel.md",
         ],
         "Solver concepts" => "concepts.md",
-        "API reference" => "api.md",
+        "API reference" => [
+            "High-level API" => "api/highlevel.md",
+            "Monitoring API" => "api/monitoring.md",
+            "Low-level API" => "api/lowlevel.md",
+        ],
     ],
     # Every exported symbol must appear in an @docs block.
     checkdocs = :exports,

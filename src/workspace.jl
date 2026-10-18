@@ -152,20 +152,16 @@ end
     initialize(printfile, summfile, leniw = 30500, lenrw = 60000) -> SnoptWorkspace
     initialize(f, printfile, summfile, leniw = 30500, lenrw = 60000)
 
-Open a SNOPT workspace with work arrays of length `leniw` (integer) and `lenrw`
-(real), and return it.
+Open a SNOPT workspace with integer and real work arrays of length `leniw` and `lenrw`
+(at least 500), and return it. `printfile` and `summfile` are the paths of the SNOPT
+log and summary; `""` writes no file. [`snmemb`](@ref) gives the sizes for a large
+problem.
 
-`printfile` and `summfile` are the paths of the SNOPT log and summary; `""` writes no
-file. Both lengths must be at least 500. Use [`snmemb`](@ref) to find the sizes for a
-large problem.
+The second form calls `f(workspace)`, closes the workspace, also on error, and returns
+the value of `f`. Close a workspace from the first form with `close`.
 
-The second form calls `f(workspace)` and returns its value. It closes the workspace
-when `f` returns and also when `f` throws an error, which it then throws again. After
-the first form, close the workspace with `close`.
-
-Only one workspace can be open in a Julia process, so `initialize` closes the
-previous workspace. Do not call `initialize` from a callback function during a solve.
-Throws an error if the SNOPT library is not loaded.
+Only one workspace is open per Julia process, so `initialize` closes the previous one;
+do not call it from a callback. Throws an error if the SNOPT library is not loaded.
 
 # Examples
 

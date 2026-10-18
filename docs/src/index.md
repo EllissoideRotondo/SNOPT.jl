@@ -98,7 +98,9 @@ every exported function and type.
 ```@contents
 Pages = [
     "concepts.md",
-    "api.md",
+    "api/highlevel.md",
+    "api/monitoring.md",
+    "api/lowlevel.md",
 ]
 Depth = 2
 ```
@@ -110,6 +112,10 @@ Depth = 2
 - Before opening a pull request, run the test suite with
   `julia --project=. -e 'using Pkg; Pkg.test()'` from the repository root.
   The solver tests run only when Julia finds a licensed `libsnopt7`.
+- To build this manual, run `julia --project=docs -e 'using Pkg; Pkg.instantiate()'`
+  and then `SNOPT_DOCS_DEPLOY=false julia --project=docs docs/make.jl` from the
+  repository root. The build runs the examples when it finds the SNOPT library;
+  `SNOPT_DOCTESTS=false` skips them. The pages are written to `docs/build/`.
 
 ## Acknowledgements
 

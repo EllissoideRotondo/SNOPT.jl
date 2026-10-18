@@ -40,18 +40,16 @@ end
 """
     find_snopt_lib() -> String
 
-Search for a usable `libsnopt7` and return its absolute path, or `""` if none is found.
+Return the absolute path of a usable `libsnopt7`, or `""` if none is found.
 
-A library is usable if it loads and contains every C function that SNOPT.jl calls.
-The search checks, in order: the directory in `SNOPTDIR`; the directories in
-`LD_LIBRARY_PATH`, `DYLD_LIBRARY_PATH` (macOS) or `PATH` (Windows); and the default
-locations of the system loader. If `SNOPTDIR` is set but contains no usable library,
-a warning is shown.
+A library is usable if it loads and has every C function that SNOPT.jl calls. The
+search checks `SNOPTDIR`, then `LD_LIBRARY_PATH`, `DYLD_LIBRARY_PATH` (macOS) or `PATH`
+(Windows), then the default locations of the system loader. It warns if `SNOPTDIR` is
+set but holds no usable library.
 
-SNOPT.jl runs this search once when the package loads and stores the result in
-`SNOPT.libsnopt7`. A later call does not change `SNOPT.libsnopt7`; use it to diagnose
-a library setup problem, and restart Julia after the correction. See also
-[`SNOPT.has_snopt`](@ref).
+SNOPT.jl runs this search once at load time and stores the result in
+`SNOPT.libsnopt7`; a later call does not change it, so restart Julia after fixing the
+setup. See also [`SNOPT.has_snopt`](@ref).
 """
 function find_snopt_lib()
     libname = string("lib", "snopt7", ".", Libdl.dlext)

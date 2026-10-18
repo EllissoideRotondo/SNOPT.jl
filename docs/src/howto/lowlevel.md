@@ -110,34 +110,27 @@ finite differences. It then changes the starting point and solves again with a h
 start.
 
 ```jldoctest snopta
-using SNOPT
+julia> using SNOPT
 
-initialize("", "") do workspace
-    set_option!(workspace, "Derivative option", 0)   # SNOPT estimates the derivatives
-
-    usrfun = make_usrfun_a((F, x) -> (F[1] = (x[1] - 2.0)^2))
-    problem = SnoptA(workspace,
-                     1, 1,                     # nf, n
-                     0.0, 1,                   # objadd, objrow
-                     Int32[], Int32[], Float64[],   # iAfun, jAvar, A: no linear part
-                     Int32[1], Int32[1],       # iGfun, jGvar: F[1] depends on x[1]
-                     [-10.0], [10.0],          # xlow, xupp
-                     [-1.0e20], [1.0e20],      # flow, fupp: no bounds on the objective row
-                     [0.0], zeros(Int32, 1), zeros(1),   # x, xstate, xmul
-                     zeros(1), zeros(Int32, 1), zeros(1), # F, Fstate, Fmul
-                     0, 0, 0, 0.0,             # status, nS, num_inf, sum_inf
-                     usrfun)
-
-    status1 = snopta!(problem)
-
-    problem.x[1] = 2.1                         # new starting point
-    status2 = snopta!(problem; start = "Hot")
-
-    (status1, status2, round(problem.x[1]; digits = 4))
-end
-
-# output
-
+julia> initialize("", "") do workspace
+           set_option!(workspace, "Derivative option", 0)  # finite differences
+           usrfun = make_usrfun_a((F, x) -> (F[1] = (x[1] - 2.0)^2))
+           problem = SnoptA(workspace,
+                            1, 1,                     # nf, n
+                            0.0, 1,                   # objadd, objrow
+                            Int32[], Int32[], Float64[],   # iAfun, jAvar, A: no linear part
+                            Int32[1], Int32[1],       # iGfun, jGvar: F[1] depends on x[1]
+                            [-10.0], [10.0],          # xlow, xupp
+                            [-1.0e20], [1.0e20],      # flow, fupp: objective row free
+                            [0.0], zeros(Int32, 1), zeros(1),   # x, xstate, xmul
+                            zeros(1), zeros(Int32, 1), zeros(1), # F, Fstate, Fmul
+                            0, 0, 0, 0.0,             # status, nS, num_inf, sum_inf
+                            usrfun)
+           status1 = snopta!(problem)
+           problem.x[1] = 2.1                         # new starting point
+           status2 = snopta!(problem; start = "Hot")
+           (status1, status2, round(problem.x[1]; digits = 4))
+       end
 (1, 1, 2.0)
 ```
 
@@ -164,38 +157,33 @@ least one. `J` must have the type `SparseMatrixCSC{Float64, Int32}`; `sparse` gi
 this type when the index vectors are `Int32`.
 
 ```jldoctest snoptb
-using SNOPT
-using SparseArrays
+julia> using SNOPT
 
-initialize("", "") do workspace
-    n, m_eff = 2, 1
-    objective(x) = (x[1] - 1.0)^2 + (x[2] - 2.0)^2
-    function gradient!(g, x)
-        g[1] = 2.0 * (x[1] - 1.0)
-        g[2] = 2.0 * (x[2] - 2.0)
-        return nothing
-    end
+julia> using SparseArrays
 
-    objfun = make_objfun(objective, gradient!, workspace.iw)
-    confun = make_dummy_confun()                   # no constraints
-    J = sparse(Int32[1], Int32[1], [0.0], m_eff, n)  # one entry at (1, 1)
-
-    problem = SnoptB(workspace,
-                     n, 0, m_eff, n,              # n, nc, m_eff, nnobj
-                     zeros(n + m_eff),            # x
-                     [-10.0, -10.0, -1.0e20],     # bl
-                     [10.0, 10.0, 1.0e20],        # bu
-                     zeros(Int32, n + m_eff),     # hs
-                     J,
-                     0.0, 0, Float64[],           # obj_val, status, lambda
-                     objfun, confun)
-
-    status = snoptb!(problem)
-    (status, round.(problem.x[1:n]; digits = 4))
-end
-
-# output
-
+julia> initialize("", "") do workspace
+           n, m_eff = 2, 1
+           objective(x) = (x[1] - 1.0)^2 + (x[2] - 2.0)^2
+           function gradient!(g, x)
+               g[1] = 2.0 * (x[1] - 1.0)
+               g[2] = 2.0 * (x[2] - 2.0)
+               return nothing
+           end
+           objfun = make_objfun(objective, gradient!, workspace.iw)
+           confun = make_dummy_confun()                   # no constraints
+           J = sparse(Int32[1], Int32[1], [0.0], m_eff, n)  # one entry at (1, 1)
+           problem = SnoptB(workspace,
+                            n, 0, m_eff, n,              # n, nc, m_eff, nnobj
+                            zeros(n + m_eff),            # x
+                            [-10.0, -10.0, -1.0e20],     # bl
+                            [10.0, 10.0, 1.0e20],        # bu
+                            zeros(Int32, n + m_eff),     # hs
+                            J,
+                            0.0, 0, Float64[],           # obj_val, status, lambda
+                            objfun, confun)
+           status = snoptb!(problem)
+           (status, round.(problem.x[1:n]; digits = 4))
+       end
 (1, [1.0, 2.0])
 ```
 
@@ -210,35 +198,30 @@ function from the same four Julia functions that [`snopt`](@ref) uses. This exam
 minimizes ``(x_1 - 2)^2`` subject to ``x_1 \ge 1``:
 
 ```jldoctest snoptc
-using SNOPT
-using SparseArrays
+julia> using SNOPT
 
-initialize("", "") do workspace
-    objective(x) = (x[1] - 2.0)^2
-    gradient!(g, x) = (g[1] = 2.0 * (x[1] - 2.0))
-    constraints!(c, x) = (c[1] = x[1])
-    jacobian!(vals, x) = (vals[1] = 1.0)
+julia> using SparseArrays
 
-    J = sparse(Int32[1], Int32[1], [1.0], 1, 1)
-    usrfun = make_usrfun_c(objective, gradient!, constraints!, jacobian!, J,
-                           workspace.iw)
-
-    problem = SnoptC(workspace,
-                     1, 1, 1, 1,                  # n, nc, m_eff, nnobj
-                     [0.0, 0.0],                  # x
-                     [-10.0, 1.0],                # bl: variable, then constraint
-                     [10.0, 1.0e20],              # bu
-                     zeros(Int32, 2),             # hs
-                     J,
-                     0.0, 0, Float64[],           # obj_val, status, lambda
-                     usrfun)
-
-    status = snoptc!(problem)
-    (status, round(problem.x[1]; digits = 4))
-end
-
-# output
-
+julia> initialize("", "") do workspace
+           objective(x) = (x[1] - 2.0)^2
+           gradient!(g, x) = (g[1] = 2.0 * (x[1] - 2.0))
+           constraints!(c, x) = (c[1] = x[1])
+           jacobian!(vals, x) = (vals[1] = 1.0)
+           J = sparse(Int32[1], Int32[1], [1.0], 1, 1)
+           usrfun = make_usrfun_c(objective, gradient!, constraints!, jacobian!, J,
+                                  workspace.iw)
+           problem = SnoptC(workspace,
+                            1, 1, 1, 1,                  # n, nc, m_eff, nnobj
+                            [0.0, 0.0],                  # x
+                            [-10.0, 1.0],                # bl: variable, then constraint
+                            [10.0, 1.0e20],              # bu
+                            zeros(Int32, 2),             # hs
+                            J,
+                            0.0, 0, Float64[],           # obj_val, status, lambda
+                            usrfun)
+           status = snoptc!(problem)
+           (status, round(problem.x[1]; digits = 4))
+       end
 (1, 2.0)
 ```
 

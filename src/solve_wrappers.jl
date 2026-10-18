@@ -31,22 +31,15 @@ end
     snopt!(prob::AbstractSnoptProblem; start = "Cold", name = "Julia",
            snlog = nothing, snstop = nothing) -> Int
 
-Solve a low-level problem in place and return the SNOPT status code.
+Solve the low-level problem `prob` in place with [`snopta!`](@ref), [`snoptb!`](@ref)
+or [`snoptc!`](@ref), and return the SNOPT status code.
 
-Calls [`snopta!`](@ref), [`snoptb!`](@ref) or [`snoptc!`](@ref) for the type of
-`prob`; see these functions for the results that they write into `prob`.
+`start` is `"Cold"`, `"Warm"` (from the basis in `prob`) or `"Hot"` (also reuses the
+factorization and Hessian of the previous solve of `prob` in the same workspace).
+`snlog`, `snstop` and `name` work as in [`snopt`](@ref).
 
-`start` is `"Cold"`, `"Warm"` or `"Hot"`. A warm start uses the basis states and `nS`
-stored in `prob`. A hot start also reuses the basis factorization and the Hessian
-approximation of the previous solve, so it is valid only with the same `prob` and the
-same open workspace.
-`snlog` and `snstop` work as in [`snopt`](@ref). `name` is the problem name in the
-SNOPT log, at most 8 bytes.
-
-Throws an `ArgumentError` if the workspace is closed, if a solve is already running,
-if `start` is not one of the three modes, or if `name` is longer than 8 bytes. An
-error thrown by a user function is thrown again after the solve; the workspace stays
-open.
+Throws an `ArgumentError` if the workspace is closed, a solve is running, or `start` or
+`name` is not valid. An error in a user function is thrown again after the solve.
 """
 function snopt!(prob::SnoptB; start::String = "Cold", name::String = "Julia",
                 snlog=nothing, snstop=nothing)

@@ -69,36 +69,27 @@ abstract type AbstractSnoptProblem end
            xlow, xupp, flow, fupp, x, xstate, xmul, F, Fstate, Fmul,
            status, nS, num_inf, sum_inf, usrfun)
 
-Low-level problem for SNOPT's `snOptA` interface. Solve it with [`snopta!`](@ref).
+Low-level problem for SNOPT's `snOptA` interface; solve it with [`snopta!`](@ref). The
+positional arguments are the fields below. See [Low-level interface](@ref).
 
-All objective and constraint functions form one vector `F(x)` of `nf` rows, and row
-`objrow` is the objective. The derivatives of `F` have a constant (linear) part and a
-part that `usrfun` computes. If `usrfun` gives no derivatives, set the option
-`"Derivative option"` to `0`, and SNOPT estimates them by finite differences. Build
-`usrfun` with [`make_usrfun_a`](@ref). The arguments are the fields, in this order. See [Low-level interface](@ref) for an example.
+The objective and the constraints form one vector `F(x)` of `nf` rows, with the
+objective in row `objrow`. The derivatives of `F` are split into constant entries and
+entries that `usrfun` computes.
 
 # Fields
 
   - `ws`: open [`SNOPT.SnoptWorkspace`](@ref).
   - `nf`, `n`: number of rows of `F` and number of variables.
-  - `objadd`: constant added to the objective.
-  - `objrow`: index of the objective row in `F`; `0` for no objective.
-  - `iAfun`, `jAvar`, `A`: row indices, column indices and values of the constant
-    derivative entries. Equal lengths; indices are `Int32`.
-  - `iGfun`, `jGvar`: row and column indices (`Int32`) of the derivative entries that
-    `usrfun` computes. Equal lengths.
-  - `xlow`, `xupp`: variable bounds, length `n`. Use `±1.0e20` for no bound.
-  - `flow`, `fupp`: row bounds, length `nf`. Use `±1.0e20` for no bound.
-  - `x`, `xstate`, `xmul`: variables, their basis states (`Int32`) and multipliers,
-    length `n`. `x` is the starting point on input and the solution on output.
-  - `F`, `Fstate`, `Fmul`: row values, their basis states (`Int32`) and multipliers,
-    length `nf`.
-  - `status`, `nS`, `num_inf`, `sum_inf`: outputs. Pass `0, 0, 0, 0.0`. After a
-    solve they hold the status code, the number of superbasic variables, and the
-    number and sum of infeasibilities.
+  - `objadd`, `objrow`: constant added to the objective, and its row (`0` for none).
+  - `iAfun`, `jAvar`, `A`: rows, columns (`Int32`) and values of the constant entries.
+  - `iGfun`, `jGvar`: rows and columns (`Int32`) of the entries that `usrfun` computes.
+  - `xlow`, `xupp`, `flow`, `fupp`: bounds of `x` (length `n`) and of `F` (length
+    `nf`); `±1.0e20` means no bound.
+  - `x`, `xstate`, `xmul`: variables, basis states (`Int32`) and multipliers, length
+    `n`. `x` holds the starting point, then the solution.
+  - `F`, `Fstate`, `Fmul`: the same for the rows, length `nf`.
+  - `status`, `nS`, `num_inf`, `sum_inf`: outputs; pass `0, 0, 0, 0.0`.
   - `usrfun`: function from [`make_usrfun_a`](@ref).
-
-[`snopta!`](@ref) throws a `DimensionMismatch` if the array lengths do not agree.
 """
 mutable struct SnoptA{F} <: AbstractSnoptProblem
     ws::SnoptWorkspace
@@ -133,33 +124,24 @@ end
            objfun, confun, nS = 0)
 
 Low-level problem for SNOPT's `snOptB` interface, with separate objective and
-constraint functions. Solve it with [`snoptb!`](@ref).
-
-[`snopt`](@ref) builds this type internally. The arrays `x`, `bl`, `bu` and `hs` have
-length `n + m_eff`: the variables first, then one slack variable per constraint row.
-Build `objfun` with [`make_objfun`](@ref) and `confun` with [`make_confun`](@ref) or
-[`make_dummy_confun`](@ref). The arguments are the fields, in this order. See
-[Low-level interface](@ref) for an example.
+constraint functions; solve it with [`snoptb!`](@ref). The positional arguments are the
+fields below. See [Low-level interface](@ref).
 
 # Fields
 
   - `ws`: open [`SNOPT.SnoptWorkspace`](@ref).
-  - `n`: number of variables.
-  - `nc`: number of constraints. All are nonlinear, and nonlinear in all `n` variables.
-  - `m_eff`: number of constraint rows, `max(nc, 1)`. SNOPT needs at least one row,
-    so a problem without constraints has one row with infinite bounds.
-  - `nnobj`: the objective is nonlinear in `x[1:nnobj]` only; usually `n`.
-  - `x`: starting point on input, solution on output. Length `n + m_eff`.
-  - `bl`, `bu`: bounds of the variables and the rows. Length `n + m_eff`. Use
-    `±1.0e20` for no bound.
-  - `hs`: basis states (`Int32`), length `n + m_eff`. Zeros for a cold start.
-  - `J`: `m_eff × n` Jacobian sparsity pattern as `SparseMatrixCSC{Float64, Int32}`
-    with at least one entry.
-  - `obj_val`, `status`, `lambda`: outputs. Pass `0.0, 0, Float64[]`. After a solve
-    they hold the objective value, the status code and the multipliers.
-  - `objfun`, `confun`: functions from the callback builders.
-  - `nS`: number of superbasic variables. `0` for a cold start; after a solve, the
-    value for a warm start.
+  - `n`, `nc`: number of variables and of constraints; all constraints are nonlinear.
+  - `m_eff`: number of rows, `max(nc, 1)`; SNOPT needs at least one.
+  - `nnobj`: the objective is nonlinear in `x[1:nnobj]`; usually `n`.
+  - `x`, `bl`, `bu`, `hs`: values, bounds and basis states (`Int32`) of the variables
+    followed by one slack variable per row, length `n + m_eff`. `±1.0e20` means no
+    bound; `hs` is zero for a cold start.
+  - `J`: `m_eff × n` sparsity pattern, a `SparseMatrixCSC{Float64, Int32}` with at
+    least one entry.
+  - `obj_val`, `status`, `lambda`: outputs; pass `0.0, 0, Float64[]`.
+  - `objfun`, `confun`: from [`make_objfun`](@ref), and from [`make_confun`](@ref) or
+    [`make_dummy_confun`](@ref).
+  - `nS`: number of superbasic variables; `0` for a cold start.
 """
 mutable struct SnoptB{F1, F2} <: AbstractSnoptProblem
     ws::SnoptWorkspace
@@ -404,43 +386,34 @@ end
 """
     SnoptMajorLog
 
-State of the solve at the end of one major iteration, passed to the `snlog` function.
-
-Return `false` from `snlog` to stop the solve; return any other value to continue. See
-[Monitor and stop a solve](@ref). SNOPT computes most values on its scaled problem.
-The arrays are copies and stay valid after `snlog` returns.
+State of the solve at the end of a major iteration, passed to `snlog`. Return `false`
+to stop the solve. The arrays are copies; most values refer to SNOPT's scaled problem.
+See [Monitor and stop a solve](@ref).
 
 # Fields
 
-  - `iteration`: total number of minor iterations so far.
-  - `major_iter`: number of the current major iteration.
-  - `minor_iter`: number of minor iterations in the current major iteration.
-  - `n_superbasics`: number of superbasic variables.
-  - `n_swaps`: number of basis changes.
+  - `iteration`, `major_iter`, `minor_iter`: total minor iterations, current major
+    iteration, and minor iterations in it.
+  - `n_superbasics`, `n_swaps`: number of superbasic variables and of basis changes.
   - `objective`: objective value, including `objective_add` and a linear objective row.
-  - `merit`: value of the merit function, the objective plus a penalty on the
-    constraint violation.
-  - `f_objective`, `f_merit`: nonlinear part of the objective and of the merit function.
-  - `primal_infeasibility`: constraint violation (scaled).
-  - `dual_infeasibility`: error in the optimality conditions (scaled).
+  - `merit`: merit function, the objective plus a penalty on the constraint violation.
+  - `f_objective`, `f_merit`: nonlinear parts of the objective and of the merit function.
+  - `primal_infeasibility`, `dual_infeasibility`: constraint violation and error in the
+    optimality conditions.
   - `max_violation`, `relative_violation`: largest constraint violation, absolute and
     relative.
-  - `step`: length of the last step.
-  - `penalty_norm`: norm of the penalty parameters of the merit function.
+  - `step`, `penalty_norm`: length of the last step and norm of the penalty parameters.
   - `condition_hessian`: estimated condition number of the reduced Hessian.
   - `objective_scale`, `objective_add`: scale factor and constant of the objective.
   - `minimize`: `1` to minimize, `-1` to maximize.
-  - `kt_conditions`: two flags, `true` when the primal and the dual parts of the
-    Karush–Kuhn–Tucker (KKT) optimality conditions are satisfied.
-  - `n`: number of variables.
-  - `nb`: number of variables plus number of slack variables.
-  - `nncon`: number of nonlinear constraints.
-  - `nnobj`: number of nonlinear objective variables.
-  - `x`: variables followed by slack variables, length `nb`.
-  - `fcon`, `fx`: nonlinear constraint values as SNOPT passes them (`fCon` and `Fx`),
-    length `nncon`.
-  - `ycon`: multipliers of the nonlinear constraints, length `nncon`.
-  - `hs`: basis states, length `nb`.
+  - `kt_conditions`: two flags, `true` when the primal and the dual
+    Karush–Kuhn–Tucker conditions hold.
+  - `n`, `nb`, `nncon`, `nnobj`: number of variables, of variables plus slack
+    variables, of nonlinear constraints and of nonlinear objective variables.
+  - `x`, `hs`: variables followed by slack variables, and their basis states; length
+    `nb`.
+  - `fcon`, `fx`, `ycon`: nonlinear constraint values as SNOPT passes them (`fCon` and
+    `Fx`), and their multipliers; length `nncon`.
 """
 struct SnoptMajorLog
     iteration::Int

@@ -157,66 +157,36 @@ end
           basis = nothing, name = "Julia") -> SnoptResult
 
 Minimize `eval_obj(x)` subject to variable bounds and optional nonlinear constraints,
-and return a [`SnoptResult`](@ref).
-
-`snopt` creates a SNOPT workspace of the necessary size, solves the problem with
-SNOPT's `snOptB` interface, and closes the workspace. It does not change `x0` or the
-bound arrays. See [Getting started](@ref) for a tutorial.
+and return a [`SnoptResult`](@ref). `x0` and the bound arrays are not changed. See
+[Getting started](@ref).
 
 # Arguments
 
-  - `eval_obj(x)`: return the objective value as a real number.
-  - `eval_grad(g, x)`: write the objective gradient into `g`. Write every entry.
-  - `x0`: starting point, nonempty and finite. Its length `n` is the number of
-    variables.
+  - `eval_obj(x)`: return the objective value.
+  - `eval_grad(g, x)`: write every entry of the objective gradient into `g`.
+  - `x0`: starting point, nonempty and finite, of length `n`.
 
 # Keywords
 
-  - `lb`, `ub`: variable bounds. A scalar applies to every variable; a vector has
-    length `n`. `nothing` and `±Inf` mean no bound.
-  - `eval_con(c, x)`: write the `m` constraint values into `c`.
-  - `eval_jac(vals, x)`: write the Jacobian entries into `vals`, in the order of
-    `J.nzval` (column by column).
-  - `lcon`, `ucon`: constraint bounds, vectors of length `m`. Equal values give an
-    equality constraint. Give `eval_con`, `eval_jac`, `lcon` and `ucon` together.
-  - `J`: sparsity pattern of the `m × n` Jacobian as a `SparseMatrixCSC`. The stored
-    values are ignored. `nothing` means that every entry can be nonzero.
-  - `options`: SNOPT options as a vector of `name => value` pairs; see
-    [Set solver options](@ref).
-  - `callback(event)`: called after each evaluation of the objective or the
-    constraints, with a `NamedTuple`.
-  - `snlog(event)`: called once per major iteration with a [`SnoptMajorLog`](@ref).
-  - `snstop(event)`: called once per major iteration with a [`SnoptStopEvent`](@ref).
-  - `start`: `"Cold"`, or `"Warm"` to start from `basis`.
-  - `basis`: [`SnoptBasis`](@ref) of an earlier result with the same `n` and `m`.
-  - `printfile`, `summfile`: paths of the SNOPT log and summary. `""` writes no file.
+  - `lb`, `ub`: variable bounds, scalars or vectors of length `n`. `nothing` and
+    `±Inf` mean no bound.
+  - `eval_con(c, x)`, `eval_jac(vals, x)`: write the `m` constraint values into `c` and
+    the Jacobian entries into `vals`, in the order of `J.nzval`.
+  - `lcon`, `ucon`: constraint bounds of length `m`; equal values give an equality.
+    Give them together with `eval_con` and `eval_jac`.
+  - `J`: sparsity pattern of the `m × n` Jacobian, a `SparseMatrixCSC`; `nothing` means
+    dense.
+  - `options`: vector of `name => value` pairs; see [Set solver options](@ref).
+  - `callback`, `snlog`, `snstop`: monitoring functions; a return value of `false`
+    stops the solve. See [Monitor and stop a solve](@ref).
+  - `start`, `basis`: `"Warm"` with the [`SnoptBasis`](@ref) of an earlier result
+    starts from that basis. See [Warm and hot starts](@ref).
+  - `printfile`, `summfile`: paths of the SNOPT log and summary; `""` writes no file.
   - `name`: problem name in the SNOPT log, at most 8 bytes.
 
-If `callback`, `snlog` or `snstop` returns `false`, SNOPT stops and the result has a
-status from `SnoptStatus.StopInFunction` to `SnoptStatus.StopInMonitor` (codes
-71–74). See [Monitor and stop a solve](@ref).
-
-Throws an `ArgumentError` for input that is not valid, for example a `NaN` bound, a
-lower bound above its upper bound, an array of the wrong length, an unknown option, a
-`name` longer than 8 bytes or `start = "Hot"`. An error thrown by a user function is
-thrown again after the workspace is closed.
-
-Only one solve runs at a time in a Julia process; a second call waits until the first
-returns. See [Solver concepts](@ref).
-
-# Examples
-
-```julia
-objective(x) = (x[1] - 1.0)^2 + (x[2] - 2.0)^2
-function gradient!(g, x)
-    g[1] = 2.0 * (x[1] - 1.0)
-    g[2] = 2.0 * (x[2] - 2.0)
-    return nothing
-end
-
-result = snopt(objective, gradient!, [0.0, 0.0]; lb = -10.0, ub = 10.0)
-result.x   # ≈ [1.0, 2.0]
-```
+Throws an `ArgumentError` for invalid input, such as a `NaN` bound, crossed bounds, a
+wrong array length, an unknown option or `start = "Hot"`. An error in a user function
+is thrown again after the workspace is closed.
 """
 function snopt(eval_obj, eval_grad,
                x0::AbstractVector{<:Real};

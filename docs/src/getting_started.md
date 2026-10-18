@@ -19,22 +19,21 @@ SNOPT needs two functions: one that returns the objective value, and one that wr
 the gradient into an array that SNOPT supplies. We define both and call `snopt`:
 
 ```jldoctest bounds
-using SNOPT
+julia> using SNOPT
 
-objective(x) = (x[1] - 1.0)^2 + (x[2] - 2.0)^2
+julia> objective(x) = (x[1] - 1.0)^2 + (x[2] - 2.0)^2;
 
-function gradient!(g, x)
-    g[1] = 2.0 * (x[1] - 1.0)
-    g[2] = 2.0 * (x[2] - 2.0)
-    return nothing
-end
+julia> function gradient!(g, x)
+           g[1] = 2.0 * (x[1] - 1.0)
+           g[2] = 2.0 * (x[2] - 2.0)
+           return nothing
+       end;
 
-x0 = [0.0, 0.0]
-result = snopt(objective, gradient!, x0; lb = -10.0, ub = 10.0)
-result.status
+julia> x0 = [0.0, 0.0];
 
-# output
+julia> result = snopt(objective, gradient!, x0; lb = -10.0, ub = 10.0);
 
+julia> result.status
 SnoptStatus.Optimal = 1
 ```
 
@@ -56,11 +55,9 @@ limits, or to keep the SNOPT log, see [Set solver options](@ref).
 `result.x` is meaningful only after a successful solve:
 
 ```jldoctest bounds
-result.status == SnoptStatus.Optimal || error("SNOPT failed: $(result.status)")
-round.(result.x; digits = 6)
+julia> result.status == SnoptStatus.Optimal || error("SNOPT failed: $(result.status)");
 
-# output
-
+julia> round.(result.x; digits = 6)
 2-element Vector{Float64}:
  1.0
  2.0
@@ -112,49 +109,48 @@ entries in the order of `J.nzval`, which for a Julia `SparseMatrixCSC` is column
 column.
 
 ```jldoctest hs71
-using SNOPT
-using SparseArrays
+julia> using SNOPT
 
-objective(x) = x[1] * x[4] * (x[1] + x[2] + x[3]) + x[3]
+julia> using SparseArrays
 
-function gradient!(g, x)
-    g[1] = x[4] * (2.0 * x[1] + x[2] + x[3])
-    g[2] = x[1] * x[4]
-    g[3] = x[1] * x[4] + 1.0
-    g[4] = x[1] * (x[1] + x[2] + x[3])
-    return nothing
-end
+julia> objective(x) = x[1] * x[4] * (x[1] + x[2] + x[3]) + x[3];
 
-function constraints!(c, x)
-    c[1] = x[1] * x[2] * x[3] * x[4]
-    c[2] = x[1]^2 + x[2]^2 + x[3]^2 + x[4]^2
-    return nothing
-end
+julia> function gradient!(g, x)
+           g[1] = x[4] * (2.0 * x[1] + x[2] + x[3])
+           g[2] = x[1] * x[4]
+           g[3] = x[1] * x[4] + 1.0
+           g[4] = x[1] * (x[1] + x[2] + x[3])
+           return nothing
+       end;
 
-# Every entry of this 2×4 Jacobian can be nonzero.
-J = sparse([1, 2, 1, 2, 1, 2, 1, 2], [1, 1, 2, 2, 3, 3, 4, 4], ones(8), 2, 4)
+julia> function constraints!(c, x)
+           c[1] = x[1] * x[2] * x[3] * x[4]
+           c[2] = x[1]^2 + x[2]^2 + x[3]^2 + x[4]^2
+           return nothing
+       end;
 
-# Column order: (1,1), (2,1), (1,2), (2,2), (1,3), (2,3), (1,4), (2,4).
-function jacobian!(vals, x)
-    vals[1] = x[2] * x[3] * x[4]
-    vals[2] = 2.0 * x[1]
-    vals[3] = x[1] * x[3] * x[4]
-    vals[4] = 2.0 * x[2]
-    vals[5] = x[1] * x[2] * x[4]
-    vals[6] = 2.0 * x[3]
-    vals[7] = x[1] * x[2] * x[3]
-    vals[8] = 2.0 * x[4]
-    return nothing
-end
+julia> # Every entry of this 2×4 Jacobian can be nonzero.
+       J = sparse([1, 2, 1, 2, 1, 2, 1, 2], [1, 1, 2, 2, 3, 3, 4, 4], ones(8), 2, 4);
 
-result = snopt(objective, gradient!, [1.0, 5.0, 5.0, 1.0];
-               lb = 1.0, ub = 5.0,
-               eval_con = constraints!, eval_jac = jacobian!,
-               lcon = [25.0, 40.0], ucon = [Inf, 40.0], J = J)
-(result.status, round(result.objective; digits = 3))
+julia> # Column order: (1,1), (2,1), (1,2), (2,2), (1,3), (2,3), (1,4), (2,4).
+       function jacobian!(vals, x)
+           vals[1] = x[2] * x[3] * x[4]
+           vals[2] = 2.0 * x[1]
+           vals[3] = x[1] * x[3] * x[4]
+           vals[4] = 2.0 * x[2]
+           vals[5] = x[1] * x[2] * x[4]
+           vals[6] = 2.0 * x[3]
+           vals[7] = x[1] * x[2] * x[3]
+           vals[8] = 2.0 * x[4]
+           return nothing
+       end;
 
-# output
+julia> result = snopt(objective, gradient!, [1.0, 5.0, 5.0, 1.0];
+                      lb = 1.0, ub = 5.0,
+                      eval_con = constraints!, eval_jac = jacobian!,
+                      lcon = [25.0, 40.0], ucon = [Inf, 40.0], J = J);
 
+julia> (result.status, round(result.objective; digits = 3))
 (SnoptStatus.Optimal, 17.014)
 ```
 
