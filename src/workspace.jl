@@ -149,60 +149,6 @@ function snopt_output_files(printfile::String, summfile::String)
 end
 
 """
-    SNOPT_STATUS::Dict{Int, Symbol}
-
-Map each SNOPT status code to a `Symbol` for its group, for example
-`1 => :Solve_Succeeded` and `31 => :Maximum_Iterations_Exceeded`.
-
-[`snopt`](@ref) uses this map to set `status_symbol` in the [`SnoptResult`](@ref). A
-code that is not in the map gives `:Unknown_Status`. [Solver concepts](@ref) lists
-all groups.
-"""
-const SNOPT_STATUS = Dict(
-    1  => :Solve_Succeeded,
-    2  => :Feasible_Point_Found,
-    3  => :Solved_To_Acceptable_Level,
-    4  => :Solved_To_Acceptable_Level,
-    5  => :Solved_To_Acceptable_Level,
-    6  => :Solved_To_Acceptable_Level,
-    11 => :Infeasible_Problem_Detected,
-    12 => :Infeasible_Problem_Detected,
-    13 => :Infeasible_Problem_Detected,
-    14 => :Infeasible_Problem_Detected,
-    15 => :Infeasible_Problem_Detected,
-    16 => :Infeasible_Problem_Detected,
-    21 => :Unbounded_Problem_Detected,
-    22 => :Unbounded_Problem_Detected,
-    31 => :Maximum_Iterations_Exceeded,
-    32 => :Maximum_Iterations_Exceeded,
-    33 => :Superbasics_Limit_Too_Small,
-    34 => :Maximum_CpuTime_Exceeded,
-    41 => :Numerical_Difficulties,
-    42 => :Numerical_Difficulties,
-    43 => :Numerical_Difficulties,
-    44 => :Numerical_Difficulties,
-    45 => :Numerical_Difficulties,
-    51 => :User_Supplied_Function_Error,
-    52 => :User_Supplied_Function_Error,
-    56 => :User_Supplied_Function_Error,
-    61 => :User_Supplied_Function_Undefined,
-    62 => :User_Supplied_Function_Undefined,
-    63 => :User_Supplied_Function_Undefined,
-    71 => :User_Requested_Stop,
-    72 => :User_Requested_Stop,
-    73 => :User_Requested_Stop,
-    74 => :User_Requested_Stop,
-    81 => :Insufficient_Memory,
-    82 => :Insufficient_Memory,
-    83 => :Insufficient_Memory,
-    84 => :Insufficient_Memory,
-    91 => :Invalid_Problem_Definition,
-    92 => :Invalid_Problem_Definition,
-    141 => :Internal_Error,
-    142 => :Internal_Error,
-    999 => :Internal_Error)
-
-"""
     initialize(printfile, summfile, leniw = 30500, lenrw = 60000) -> SnoptWorkspace
     initialize(f, printfile, summfile, leniw = 30500, lenrw = 60000)
 

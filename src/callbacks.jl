@@ -594,7 +594,7 @@ end
 Wrap `callback` in a function that SNOPT can call once per major iteration.
 
 SNOPT.jl calls `callback` with a [`SnoptStopEvent`](@ref). If it returns `false`,
-SNOPT stops with status code 74 (`:User_Requested_Stop`). The solve functions call
+SNOPT stops with status code 74 (`SnoptStatus.StopInMonitor`). The solve functions call
 `make_snstop` when they receive the `snstop` keyword, so a direct call is rarely
 necessary.
 """

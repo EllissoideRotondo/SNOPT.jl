@@ -95,3 +95,15 @@ end
         @eval SNOPT libsnopt7 = $saved_library
     end
 end
+
+@testset "SnoptStatus values are the SNOPT 7.7 status codes" begin
+    # Given the codes listed in section 8.6 and the snOptA INFO summary of the guide,
+    # when the enum is converted to integers, then it holds exactly those codes.
+    guide_codes = [1, 2, 3, 5, 6, 11:16..., 21, 22, 31:34..., 41:45..., 51, 52, 56,
+                   61:63..., 71:74..., 81:84..., 91, 92, 141, 142]
+    @test collect(Int.(instances(SnoptStatus.T))) == [0; guide_codes]
+    @test SNOPT.status_from_code(51) === SnoptStatus.IncorrectObjectiveDerivatives
+    @test SNOPT.status_from_code(4) === SnoptStatus.Unknown
+    @test Base.ispublic(SNOPT, :status_from_code)
+    @test repr("text/plain", SnoptStatus.Optimal) == "SnoptStatus.Optimal = 1"
+end

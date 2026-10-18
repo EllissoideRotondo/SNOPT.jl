@@ -69,7 +69,7 @@ end
 
 result = snopt(objective, gradient!, [0.0, 0.0]; lb = -10.0, ub = 10.0)
 
-result.status_symbol   # :Solve_Succeeded
+result.status   # SnoptStatus.Optimal = 1
 result.x               # ≈ [1.0, 2.0]
 ```
 
@@ -88,7 +88,7 @@ shows.
 | Print progress or stop a solve early | `snlog`, `snstop` keywords | [Monitor and stop a solve](https://EllissoideRotondo.github.io/SNOPT.jl/dev/howto/monitoring/) |
 | Start from a previous solution | `start`, `basis` keywords | [Warm and hot starts](https://EllissoideRotondo.github.io/SNOPT.jl/dev/howto/warm_start/) |
 | Use finite differences or linear rows | `SnoptA`, `snopta!` | [Low-level interface](https://EllissoideRotondo.github.io/SNOPT.jl/dev/howto/lowlevel/) |
-| Understand status codes and iterations | `SNOPT_STATUS` | [Solver concepts](https://EllissoideRotondo.github.io/SNOPT.jl/dev/concepts/) |
+| Understand status codes and iterations | `SnoptStatus` | [Solver concepts](https://EllissoideRotondo.github.io/SNOPT.jl/dev/concepts/) |
 | Look up a function or a type | | [API reference](https://EllissoideRotondo.github.io/SNOPT.jl/dev/api/) |
 
 ## Limits

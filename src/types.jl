@@ -268,18 +268,111 @@ struct SnoptBasis
 end
 
 """
+    SnoptStatus
+
+Status of a SNOPT solve. Each value of type `SnoptStatus.T` is a SNOPT 7.7 status code:
+`SnoptStatus.T(51)` gives `SnoptStatus.IncorrectObjectiveDerivatives`, and `Int` gives
+the code back. The tens digit is the group, so `Int(status) ÷ 10 == 1` holds for every
+infeasible outcome. `SnoptStatus.Unknown` (`0`) stands for a code that the SNOPT 7.7 user
+guide does not list. [Solver concepts](@ref) describes each group.
+
+# Examples
+
+```jldoctest
+julia> SnoptStatus.T(51)
+SnoptStatus.IncorrectObjectiveDerivatives = 51
+
+julia> Int(SnoptStatus.TimeLimit)
+34
+```
+"""
+module SnoptStatus
+@enum T::Int begin
+    Unknown                           = 0
+    # Finished successfully
+    Optimal                           = 1
+    FeasiblePoint                     = 2
+    AccuracyNotAchieved               = 3
+    ElasticObjectiveMinimized         = 5
+    ElasticInfeasibilitiesMinimized   = 6
+    # The problem appears to be infeasible
+    InfeasibleLinear                  = 11
+    InfeasibleLinearEqualities        = 12
+    NonlinearInfeasibilitiesMinimized = 13
+    LinearInfeasibilitiesMinimized    = 14
+    InfeasibleQPSubproblem            = 15
+    InfeasibleNonelastic              = 16
+    # The problem appears to be unbounded
+    UnboundedObjective                = 21
+    ConstraintViolationLimit          = 22
+    # Resource limit error
+    IterationLimit                    = 31
+    MajorIterationLimit               = 32
+    SuperbasicsLimit                  = 33
+    TimeLimit                         = 34
+    # Terminated after numerical difficulties
+    CannotImprove                     = 41
+    SingularBasis                     = 42
+    CannotSatisfyConstraints          = 43
+    IllConditionedNullSpace           = 44
+    LUFactorizationFailed             = 45
+    # Error in the user-supplied functions
+    IncorrectObjectiveDerivatives     = 51
+    IncorrectConstraintDerivatives    = 52
+    BadlyScaledFunctions              = 56
+    # Undefined user-supplied functions
+    UndefinedAtFirstFeasiblePoint     = 61
+    UndefinedAtInitialPoint           = 62
+    UndefinedRegion                   = 63
+    # User requested termination
+    StopInFunction                    = 71
+    StopInConstraints                 = 72
+    StopInObjective                   = 73
+    StopInMonitor                     = 74
+    # Insufficient storage allocated
+    WorkArraysTooSmall                = 81
+    CharacterStorage                  = 82
+    IntegerStorage                    = 83
+    RealStorage                       = 84
+    # Input arguments out of range
+    InvalidInput                      = 91
+    BasisFileMismatch                 = 92
+    # System error
+    WrongBasicVariableCount           = 141
+    BasisPackageError                 = 142
+end
+
+Base.show(io::IO, status::T) = print(io, "SnoptStatus.", Symbol(status))
+function Base.show(io::IO, ::MIME"text/plain", status::T)
+    show(io, status)
+    print(io, " = ", Int(status))
+end
+end
+
+"""
+    SNOPT.status_from_code(code::Integer) -> SnoptStatus.T
+
+Return the [`SnoptStatus`](@ref) value of the SNOPT status code `code`, or
+`SnoptStatus.Unknown` for a code that the SNOPT 7.7 user guide does not list. Unlike
+`SnoptStatus.T(code)`, it never throws, so it is safe to call on the code returned by
+[`snopt!`](@ref), [`snopta!`](@ref), [`snoptb!`](@ref) or [`snoptc!`](@ref).
+"""
+function status_from_code(code::Integer)
+    code in Int.(instances(SnoptStatus.T)) || return SnoptStatus.Unknown
+    return SnoptStatus.T(code)
+end
+
+"""
     SnoptResult
 
 Result of [`snopt`](@ref).
 
-Check `status_symbol` before using `x`. See [Solver concepts](@ref) for the status
-codes.
+Check `status` before using `x`, for example `result.status == SnoptStatus.Optimal`.
 
 # Fields
 
-  - `status`: SNOPT status code (`Int`).
-  - `status_symbol`: group of the status code, from [`SNOPT_STATUS`](@ref), for
-    example `:Solve_Succeeded`.
+  - `status`: outcome of the solve, a [`SnoptStatus`](@ref) value; `Int(status)` is the
+    SNOPT status code.
   - `objective`: objective value at `x`.
   - `x`: solution, length `n`.
   - `lambda`: Lagrange multipliers, one per variable and then one per constraint.
@@ -295,8 +388,7 @@ If a `callback` function stopped the solve before SNOPT started, `basis` contain
 information and the iteration counts are zero.
 """
 struct SnoptResult
-    status::Int
-    status_symbol::Symbol
+    status::SnoptStatus.T
     objective::Float64
     x::Vector{Float64}
     lambda::Vector{Float64}
@@ -389,7 +481,7 @@ State of the solve at the end of one major iteration, passed to the `snstop` fun
 
 This type has all the fields of [`SnoptMajorLog`](@ref) and the fields below. Return
 `false` from `snstop` to stop the solve; the result then has the status
-`:User_Requested_Stop`. See [Monitor and stop a solve](@ref).
+`SnoptStatus.StopInMonitor`. See [Monitor and stop a solve](@ref).
 
 # Fields
 

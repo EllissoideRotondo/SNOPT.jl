@@ -5,6 +5,13 @@
 ### Breaking
 
 - Minimum Julia version is now 1.11.
+- `SnoptResult.status` is now a `SnoptStatus.T` enum value, whose integer value is
+  the SNOPT status code; `Int(result.status)` gives the code. The `status_symbol`
+  field and the `SNOPT_STATUS` dictionary are removed. Replace
+  `result.status_symbol == :Solve_Succeeded` and `result.status == 1` by
+  `result.status == SnoptStatus.Optimal`. The enum holds the codes of the SNOPT 7.7
+  user guide; the undocumented codes 4 and 999 of the old dictionary are gone, and
+  any unlisted code gives `SnoptStatus.Unknown`.
 - The high-level `snopt` rejects `start = "Hot"` with an `ArgumentError`.
   SNOPT's hot start reuses factorization state stored inside the previous
   solve's workspace; the high-level entry point builds a fresh workspace per
@@ -27,7 +34,7 @@
   `snopta!`, `snoptb!`, and `snoptc!`. It delivers a `SnoptStopEvent` per major
   iteration - everything `snlog` reports plus the objective gradient, Jacobian
   values, row multipliers, reduced costs, and reduced gradient - and returning
-  `false` from it stops the solve with `:User_Requested_Stop`. Use it for custom
+  `false` from it stops the solve with `SnoptStatus.StopInMonitor`. Use it for custom
   termination criteria.
 - Objective, gradient, and constraint callbacks accept any callable object, not
   only `Function` subtypes.

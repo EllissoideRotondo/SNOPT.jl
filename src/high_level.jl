@@ -92,11 +92,9 @@ function prepare_constraint_data(eval_con, eval_jac, lcon, ucon)
 end
 
 function snopt_result(prob::SnoptB, memory::SnoptMemory)
-    status = Int(prob.status)
-    status_symbol = get(SNOPT_STATUS, status, :Unknown_Status)
     lambda_length = prob.n + prob.nc
     basis = SnoptBasis(copy(prob.hs), prob.nS, prob.n, prob.m_eff)
-    return SnoptResult(status, status_symbol, prob.obj_val, copy(prob.x[1:prob.n]),
+    return SnoptResult(status_from_code(prob.status), prob.obj_val, copy(prob.x[1:prob.n]),
                        copy(prob.lambda[1:lambda_length]),
                        prob.ws.num_inf, prob.ws.sum_inf,
                        prob.ws.iterations, prob.ws.major_itns, prob.ws.run_time,
@@ -136,10 +134,8 @@ function preflight_callbacks!(eval_obj, eval_grad,
 end
 
 function preflight_stop_result(stop, n::Int, nc::Int, memory::SnoptMemory)
-    status = Int(stop.status)
     return SnoptResult(
-        status,
-        get(SNOPT_STATUS, status, :Unknown_Status),
+        status_from_code(stop.status),
         stop.objective,
         stop.x,
         zeros(n + nc),
@@ -196,8 +192,9 @@ bound arrays. See [Getting started](@ref) for a tutorial.
   - `printfile`, `summfile`: paths of the SNOPT log and summary. `""` writes no file.
   - `name`: problem name in the SNOPT log, at most 8 bytes.
 
-If `callback`, `snlog` or `snstop` returns `false`, SNOPT stops and the result has the
-status `:User_Requested_Stop`. See [Monitor and stop a solve](@ref).
+If `callback`, `snlog` or `snstop` returns `false`, SNOPT stops and the result has a
+status from `SnoptStatus.StopInFunction` to `SnoptStatus.StopInMonitor` (codes
+71–74). See [Monitor and stop a solve](@ref).
 
 Throws an `ArgumentError` for input that is not valid, for example a `NaN` bound, a
 lower bound above its upper bound, an array of the wrong length, an unknown option, a

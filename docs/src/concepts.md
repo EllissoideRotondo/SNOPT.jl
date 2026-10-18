@@ -76,32 +76,35 @@ change and check only their lengths, so they need `±1.0e20` for an infinite bou
 
 ## Status codes
 
-When a solve ends, SNOPT returns an integer status code. SNOPT.jl stores this code in
-`result.status`, and it stores in `result.status_symbol` a symbol that names the group
-of related codes, taken from the dictionary [`SNOPT_STATUS`](@ref). Program logic
-should test the symbol; the integer gives the exact reason, and the
+When a solve ends, SNOPT returns an integer status code. SNOPT.jl stores it in
+`result.status` as a value of the enum [`SnoptStatus`](@ref), whose integer value is the
+code itself: `Int(result.status)` gives the code, and `SnoptStatus.T(code)` gives the
+value. Program logic tests the value, for example
+`result.status == SnoptStatus.Optimal`; a misspelt name then fails with an
+`UndefVarError` instead of comparing as `false`. The tens digit of a code is its group,
+so `Int(result.status) ÷ 10 == 1` holds for every infeasible outcome. The
 [SNOPT 7.7 user guide](https://ccom.ucsd.edu/~optimizers/static/pdfs/sndoc7.pdf#page=110)
 explains each code.
 
-| Code | `status_symbol` | Meaning |
+| Codes | `SnoptStatus` values | Meaning |
 | --- | --- | --- |
-| 1 | `:Solve_Succeeded` | Optimal solution found. |
-| 2 | `:Feasible_Point_Found` | Feasible point found (the objective was not optimized). |
-| 3–6 | `:Solved_To_Acceptable_Level` | Partial success, for example the requested accuracy was not reached. Check the exact code. |
-| 11–16 | `:Infeasible_Problem_Detected` | The constraints cannot be satisfied. |
-| 21–22 | `:Unbounded_Problem_Detected` | The objective decreases without limit. |
-| 31–32 | `:Maximum_Iterations_Exceeded` | An iteration limit was reached. |
-| 33 | `:Superbasics_Limit_Too_Small` | The option `"Superbasics limit"` is too small. |
-| 34 | `:Maximum_CpuTime_Exceeded` | The CPU time limit (option `"Time limit"`) was reached. |
-| 41–45 | `:Numerical_Difficulties` | SNOPT could not continue for numerical reasons. |
-| 51–52, 56 | `:User_Supplied_Function_Error` | The derivatives appear to be wrong, or the functions are badly scaled. |
-| 61–63 | `:User_Supplied_Function_Undefined` | A function could not be evaluated at a point. |
-| 71–74 | `:User_Requested_Stop` | A callback function returned `false`. |
-| 81–84 | `:Insufficient_Memory` | The SNOPT workspace is too small. |
-| 91–92 | `:Invalid_Problem_Definition` | The problem data are not valid. |
-| 141–142, 999 | `:Internal_Error` | Error inside SNOPT. |
-
-A code that is not in [`SNOPT_STATUS`](@ref) gives `:Unknown_Status`.
+| 1 | `Optimal` | Optimal solution found. |
+| 2 | `FeasiblePoint` | Feasible point found; the objective was not optimized (option `"Feasible point only"`). |
+| 3 | `AccuracyNotAchieved` | The requested accuracy could not be achieved. |
+| 5–6 | `ElasticObjectiveMinimized`, `ElasticInfeasibilitiesMinimized` | Results of SNOPT's elastic mode, which relaxes the constraints marked as elastic. |
+| 11–16 | `InfeasibleLinear`, `InfeasibleLinearEqualities`, `NonlinearInfeasibilitiesMinimized`, `LinearInfeasibilitiesMinimized`, `InfeasibleQPSubproblem`, `InfeasibleNonelastic` | The constraints cannot be satisfied. |
+| 21–22 | `UnboundedObjective`, `ConstraintViolationLimit` | The objective decreases without limit, or the constraint violation limit was reached. |
+| 31–32 | `IterationLimit`, `MajorIterationLimit` | The minor or the major iteration limit was reached. |
+| 33 | `SuperbasicsLimit` | The option `"Superbasics limit"` is too small. |
+| 34 | `TimeLimit` | The CPU time limit (option `"Time limit"`) was reached. |
+| 41–45 | `CannotImprove`, `SingularBasis`, `CannotSatisfyConstraints`, `IllConditionedNullSpace`, `LUFactorizationFailed` | SNOPT could not continue for numerical reasons. |
+| 51, 52, 56 | `IncorrectObjectiveDerivatives`, `IncorrectConstraintDerivatives`, `BadlyScaledFunctions` | The derivatives appear to be wrong, or the functions are badly scaled. |
+| 61–63 | `UndefinedAtFirstFeasiblePoint`, `UndefinedAtInitialPoint`, `UndefinedRegion` | A function could not be evaluated at a point. |
+| 71–74 | `StopInFunction`, `StopInConstraints`, `StopInObjective`, `StopInMonitor` | A user function returned `false`. |
+| 81–84 | `WorkArraysTooSmall`, `CharacterStorage`, `IntegerStorage`, `RealStorage` | The SNOPT workspace is too small. |
+| 91–92 | `InvalidInput`, `BasisFileMismatch` | The problem data or the basis file are not valid. |
+| 141–142 | `WrongBasicVariableCount`, `BasisPackageError` | Error inside SNOPT. |
+| any other | `Unknown` (`0`) | A code that the SNOPT 7.7 user guide does not list. |
 
 ## One SNOPT workspace per Julia process
 

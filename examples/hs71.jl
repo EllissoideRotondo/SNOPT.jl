@@ -70,6 +70,6 @@ result = snopt(
     printfile = joinpath(@__DIR__, "hs71.out"),
 )
 
-@assert result.status_symbol == :Solve_Succeeded
+@assert result.status == SnoptStatus.Optimal
 @assert isapprox(result.objective, 17.014017; atol = 1.0e-5)
 @assert isapprox(result.x, [1.0, 4.743, 3.821, 1.379]; atol = 1.0e-3)

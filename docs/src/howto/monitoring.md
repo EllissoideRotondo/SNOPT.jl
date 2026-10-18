@@ -56,11 +56,12 @@ This example stops the solve after 30 seconds of wall-clock time:
 deadline = time() + 30.0
 result = snopt(objective, gradient!, x0;
                snstop = event -> time() < deadline)
-result.status_symbol   # :User_Requested_Stop if the deadline was reached
+result.status   # SnoptStatus.StopInMonitor if the deadline was reached
 ```
 
-When a function returns `false`, the result has the status
-`:User_Requested_Stop`, and `result.x` is the point at which SNOPT stopped.
+When a function returns `false`, the result has a status from
+`SnoptStatus.StopInFunction` to `SnoptStatus.StopInMonitor` (codes 71–74), and
+`result.x` is the point at which SNOPT stopped.
 To limit only the number of iterations or the CPU time, use the options
 `"Major iterations limit"` or `"Time limit"` instead. The option `"Time limit"`
 measures CPU time, so use `snstop` to stop on wall-clock time, as in this example.
@@ -89,6 +90,6 @@ clamped to its bounds `[lb, ub]`. This finds errors in the user functions early.
 `callback` is also called for these first evaluations.
 
 If `callback` returns `false` during these first evaluations, SNOPT does not start.
-The result then has the status `:User_Requested_Stop`, and `result.basis` contains
+The result then has the status `SnoptStatus.StopInFunction`, and `result.basis` contains
 no information: a [warm start](@ref "Warm and hot starts") from it is the same as a
 cold start.

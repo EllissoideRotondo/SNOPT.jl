@@ -31,11 +31,11 @@ end
 
 x0 = [0.0, 0.0]
 result = snopt(objective, gradient!, x0; lb = -10.0, ub = 10.0)
-result.status_symbol
+result.status
 
 # output
 
-:Solve_Succeeded
+SnoptStatus.Optimal = 1
 ```
 
 The arguments of this call are:
@@ -56,7 +56,7 @@ limits, or to keep the SNOPT log, see [Set solver options](@ref).
 `result.x` is meaningful only after a successful solve:
 
 ```jldoctest bounds
-result.status_symbol == :Solve_Succeeded || error("SNOPT failed: $(result.status)")
+result.status == SnoptStatus.Optimal || error("SNOPT failed: $(result.status)")
 round.(result.x; digits = 6)
 
 # output
@@ -68,8 +68,7 @@ round.(result.x; digits = 6)
 
 | Field | Content |
 | --- | --- |
-| `status` | SNOPT status code, an integer. |
-| `status_symbol` | `Symbol` for a group of related status codes, for example `:Solve_Succeeded`. |
+| `status` | Outcome of the solve, a [`SnoptStatus`](@ref) value such as `SnoptStatus.Optimal`. `Int(result.status)` is the SNOPT status code. |
 | `x` | Solution. |
 | `objective` | Objective value at `x`. |
 | `lambda` | Lagrange multipliers: one per variable, then one per constraint. |
@@ -152,11 +151,11 @@ result = snopt(objective, gradient!, [1.0, 5.0, 5.0, 1.0];
                lb = 1.0, ub = 5.0,
                eval_con = constraints!, eval_jac = jacobian!,
                lcon = [25.0, 40.0], ucon = [Inf, 40.0], J = J)
-(result.status_symbol, round(result.objective; digits = 3))
+(result.status, round(result.objective; digits = 3))
 
 # output
 
-(:Solve_Succeeded, 17.014)
+(SnoptStatus.Optimal, 17.014)
 ```
 
 Without `J`, SNOPT.jl assumes that every Jacobian entry can be nonzero and orders the

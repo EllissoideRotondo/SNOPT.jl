@@ -10,7 +10,8 @@ CurrentModule = SNOPT
 snopt
 SnoptResult
 SnoptBasis
-SNOPT_STATUS
+SnoptStatus
+SNOPT.status_from_code
 ```
 
 ## Monitor a solve

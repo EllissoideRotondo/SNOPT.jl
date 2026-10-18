@@ -79,7 +79,7 @@
             snlog=event -> SNOPT.initialize("", ""))
         @test SNOPT.active_snopt_callback_count() == 0
         result = SNOPT.snopt(objective, gradient!, [1.0])
-        @test result.status == 1
+        @test result.status === SnoptStatus.Optimal
         @test result.x ≈ [0.0] atol=1e-6
     end
 

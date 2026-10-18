@@ -153,7 +153,8 @@ export make_objfun
 export make_confun
 export make_dummy_confun
 export snopt_no_progress
-export SNOPT_STATUS
+export SnoptStatus
+public status_from_code
 export specs_status_message
 
 end

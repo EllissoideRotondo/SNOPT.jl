@@ -473,25 +473,6 @@ end
     @test SNOPT.active_snopt_callback_count() == 0
 end
 
-@testset "SNOPT_STATUS dictionary" begin
-    @test SNOPT.SNOPT_STATUS[1]   == :Solve_Succeeded
-    @test SNOPT.SNOPT_STATUS[2]   == :Feasible_Point_Found
-    @test SNOPT.SNOPT_STATUS[11]  == :Infeasible_Problem_Detected
-    @test SNOPT.SNOPT_STATUS[21]  == :Unbounded_Problem_Detected
-    @test SNOPT.SNOPT_STATUS[31]  == :Maximum_Iterations_Exceeded
-    @test SNOPT.SNOPT_STATUS[32]  == :Maximum_Iterations_Exceeded
-    # 33 is "the superbasics limit is too small", not an iteration limit.
-    @test SNOPT.SNOPT_STATUS[33]  == :Superbasics_Limit_Too_Small
-    @test SNOPT.SNOPT_STATUS[34]  == :Maximum_CpuTime_Exceeded
-    @test SNOPT.SNOPT_STATUS[41]  == :Numerical_Difficulties
-    @test SNOPT.SNOPT_STATUS[71]  == :User_Requested_Stop
-    @test SNOPT.SNOPT_STATUS[81]  == :Insufficient_Memory
-    @test SNOPT.SNOPT_STATUS[84]  == :Insufficient_Memory
-    @test SNOPT.SNOPT_STATUS[141] == :Internal_Error
-    @test SNOPT.SNOPT_STATUS[142] == :Internal_Error
-    @test SNOPT.SNOPT_STATUS[999] == :Internal_Error
-end
-
 @testset "read_options" begin
     ws = make_ws()
     file = joinpath(@__DIR__, "specsfile")
@@ -531,8 +512,7 @@ end
             false
         end
     )
-    @test stopped.status == 71
-    @test stopped.status_symbol === :User_Requested_Stop
+    @test stopped.status === SnoptStatus.StopInFunction
     @test stopped.x == [0.0]
     @test stopped.objective ≈ 1.0
     @test calls[] == 1
@@ -554,8 +534,7 @@ end
     )
 
     @test result isa SnoptResult
-    @test result.status == 1
-    @test result.status_symbol === :Solve_Succeeded
+    @test result.status === SnoptStatus.Optimal
     @test result.objective ≈ 0.0 atol=1e-6
     @test result.x[1] ≈ 1.0 atol=1e-5
     @test result.x[2] ≈ 2.0 atol=1e-5
@@ -739,7 +718,7 @@ end
         ]
     )
 
-    @test result.status == 1
+    @test result.status === SnoptStatus.Optimal
     @test result.objective ≈ 17.0140 atol=1e-3
     @test result.x[1] ≈ 1.0 atol=1e-3
     @test result.x[2] ≈ 4.7430 atol=1e-3
@@ -901,7 +880,7 @@ end
         (g, x) -> begin g[1] = 2(x[1] + 3) end,
         [2.0]; lb = [-1.0], ub = [5.0], options = silent
     )
-    @test solve_once().status == 1
+    @test solve_once().status === SnoptStatus.Optimal
 
     mktempdir() do dir
         readonly = joinpath(dir, "readonly")
@@ -928,7 +907,7 @@ end
 
     # The session must still be healthy afterwards. This is the assertion that
     # actually caught the bad null-device fallback.
-    @test solve_once().status == 1
+    @test solve_once().status === SnoptStatus.Optimal
 end
 
 @testset "Jacobian shape validation" begin
@@ -1089,7 +1068,7 @@ end
         lb = -10.0, ub = 10.0,
         options = ["Major print level" => 0, "Minor print level" => 0]
     )
-    @test result.status == 1
+    @test result.status === SnoptStatus.Optimal
     @test result.x ≈ target atol = 1.0e-5
 end
 
@@ -1105,7 +1084,7 @@ end
                 options = ["Major print level" => 0, "Minor print level" => 0]
             )
         end
-        @test all(r -> r.status == 1, results)
+        @test all(r -> r.status === SnoptStatus.Optimal, results)
         @test all(r -> isapprox(r.x, [1.0, 2.0]; atol = 1.0e-5), results)
     else
         @info "single-threaded session; skipping concurrency test"
@@ -1151,7 +1130,7 @@ end
         lb = [1.0], ub = [10.0],
         options = ["Major print level" => 0, "Minor print level" => 0]
     )
-    @test result.status == 1
+    @test result.status === SnoptStatus.Optimal
     @test result.x[1] ≈ 1.0 atol = 1e-6
 end
 
@@ -1164,7 +1143,7 @@ end
     end
 
     solved = snopt(f, g!, [0.0, 0.0]; lb = -10.0, ub = 10.0, options = silent)
-    @test solved.status == 1
+    @test solved.status === SnoptStatus.Optimal
     @test solved.basis isa SnoptBasis
     @test length(solved.basis.hs) == 2 + 1
     @test solved.basis.n == 2
@@ -1174,7 +1153,7 @@ end
     cold = snopt(f, g!, perturbed; lb = -10.0, ub = 10.0, options = silent)
     warm = snopt(f, g!, perturbed; lb = -10.0, ub = 10.0, options = silent,
                  start = "Warm", basis = solved.basis)
-    @test warm.status == 1
+    @test warm.status === SnoptStatus.Optimal
     @test warm.x ≈ cold.x atol = 1.0e-5
     @test warm.major_itns <= cold.major_itns
 
@@ -1265,8 +1244,7 @@ end
 
     status = snopt!(prob)
     @test called[]
-    @test status ∈ keys(SNOPT.SNOPT_STATUS)   # some valid inform code
-    @test SNOPT.SNOPT_STATUS[status] === :User_Requested_Stop
+    @test SNOPT.status_from_code(status) === SnoptStatus.StopInObjective
 end
 
 
@@ -1275,7 +1253,7 @@ end
     logs = SnoptLogCollector(SnoptMajorLog[])
     result = solve_hs71(snlog = logs, snstop = stops)
 
-    @test result.status == 1
+    @test result.status === SnoptStatus.Optimal
     @test result.objective ≈ 17.0140 atol = 1e-3
     @test !isempty(stops.events)
     @test all(e -> e isa SnoptStopEvent, stops.events)
@@ -1338,7 +1316,7 @@ end
     stops = SnoptStopCollector(SnoptStopEvent[], 2)
     result = solve_hs71(snstop = stops)
 
-    @test SNOPT.SNOPT_STATUS[result.status] === :User_Requested_Stop
+    @test result.status === SnoptStatus.StopInMonitor
     @test stops.events[end].major_iter == 2
     @test result.major_itns <= 3
     @test SNOPT.active_snopt_callback_count() == 0

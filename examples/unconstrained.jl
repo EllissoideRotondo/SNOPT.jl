@@ -33,6 +33,6 @@ result = snopt(
     printfile = joinpath(@__DIR__, "unconstrained.out"),
 )
 
-@assert result.status_symbol == :Solve_Succeeded
+@assert result.status == SnoptStatus.Optimal
 @assert isapprox(result.objective, 0.0; atol = 1.0e-8)
 @assert isapprox(result.x, [1.0, 2.0]; atol = 1.0e-6)
