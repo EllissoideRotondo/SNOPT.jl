@@ -9,93 +9,76 @@ initialize(&quot;&quot;, &quot;&quot;, memory.miniw, memory.minrw) do workspace
     # ...
 end</code></pre><table><tr><th style="text-align: right">Argument</th><th style="text-align: right">Meaning</th></tr><tr><td style="text-align: right"><code>m</code></td><td style="text-align: right">Number of constraint rows (at least 1).</td></tr><tr><td style="text-align: right"><code>n</code></td><td style="text-align: right">Number of variables.</td></tr><tr><td style="text-align: right"><code>neJ</code></td><td style="text-align: right">Number of entries in the Jacobian sparsity pattern.</td></tr><tr><td style="text-align: right"><code>negCon</code></td><td style="text-align: right">Number of those entries that belong to nonlinear constraints.</td></tr><tr><td style="text-align: right"><code>nnCon</code></td><td style="text-align: right">Number of nonlinear constraints.</td></tr><tr><td style="text-align: right"><code>nnObj</code></td><td style="text-align: right">Number of variables that appear nonlinearly in the objective.</td></tr><tr><td style="text-align: right"><code>nnJac</code></td><td style="text-align: right">Number of variables that appear nonlinearly in the constraints.</td></tr></table><p>SNOPT requires that the nonlinear variables come first in <code>x</code>: the objective is nonlinear in <code>x[1:nnObj]</code> only, and the constraints in <code>x[1:nnJac]</code> only. Each work array must have at least 500 entries. For an <a href="../../api/lowlevel/#SNOPT.SnoptA"><code>SnoptA</code></a> problem, there is no sizing function: if the solve ends with a status from 81 to 84, open a larger workspace.</p><h2 id="Options"><a class="docs-heading-anchor" href="#Options">Options</a><a id="Options-1"></a><a class="docs-heading-anchor-permalink" href="#Options" title="Permalink"></a></h2><p><a href="../../api/lowlevel/#SNOPT.set_option!"><code>set_option!</code></a> sets one option on an open workspace:</p><pre><code class="language-julia hljs">set_option!(workspace, &quot;Major iterations limit&quot;, 250)
 set_option!(workspace, &quot;Major optimality tolerance&quot;, 1.0e-8)
-set_option!(workspace, &quot;Hessian limited memory&quot;)</code></pre><p>The option names are the same as in <a href="../options/#Set-solver-options">Set solver options</a>. <a href="../../api/lowlevel/#SNOPT.read_options"><code>read_options</code></a> reads a specs file, as that page also describes.</p><h2 id="SnoptA:-finite-differences,-linear-rows-and-hot-starts"><a class="docs-heading-anchor" href="#SnoptA:-finite-differences,-linear-rows-and-hot-starts"><code>SnoptA</code>: finite differences, linear rows and hot starts</a><a id="SnoptA:-finite-differences,-linear-rows-and-hot-starts-1"></a><a class="docs-heading-anchor-permalink" href="#SnoptA:-finite-differences,-linear-rows-and-hot-starts" title="Permalink"></a></h2><p><a href="../../api/lowlevel/#SNOPT.SnoptA"><code>SnoptA</code></a> puts the objective and all constraints in one vector <span>$F(x)$</span> of <code>nf</code> rows. Row <code>objrow</code> is the objective; the other rows are constraints with bounds <code>flow ≤ F ≤ fupp</code>. The derivatives of <span>$F$</span> come in two parts, both as lists of (row, column) positions:</p><ul><li>The linear part: constant entries <code>A[k]</code> at position <code>(iAfun[k], jAvar[k])</code>.</li><li>The nonlinear part: positions <code>(iGfun[k], jGvar[k])</code> whose values the user function computes.</li></ul><p>This example minimizes <span>$(x_1 - 2)^2$</span> without derivatives, so SNOPT estimates them by finite differences. It then changes the starting point and solves again with a hot start.</p><pre><code class="language-julia hljs">using SNOPT
+set_option!(workspace, &quot;Hessian limited memory&quot;)</code></pre><p>The option names are the same as in <a href="../options/#Set-solver-options">Set solver options</a>. <a href="../../api/lowlevel/#SNOPT.read_options"><code>read_options</code></a> reads a specs file, as that page also describes.</p><h2 id="SnoptA:-finite-differences,-linear-rows-and-hot-starts"><a class="docs-heading-anchor" href="#SnoptA:-finite-differences,-linear-rows-and-hot-starts"><code>SnoptA</code>: finite differences, linear rows and hot starts</a><a id="SnoptA:-finite-differences,-linear-rows-and-hot-starts-1"></a><a class="docs-heading-anchor-permalink" href="#SnoptA:-finite-differences,-linear-rows-and-hot-starts" title="Permalink"></a></h2><p><a href="../../api/lowlevel/#SNOPT.SnoptA"><code>SnoptA</code></a> puts the objective and all constraints in one vector <span>$F(x)$</span> of <code>nf</code> rows. Row <code>objrow</code> is the objective; the other rows are constraints with bounds <code>flow ≤ F ≤ fupp</code>. The derivatives of <span>$F$</span> come in two parts, both as lists of (row, column) positions:</p><ul><li>The linear part: constant entries <code>A[k]</code> at position <code>(iAfun[k], jAvar[k])</code>.</li><li>The nonlinear part: positions <code>(iGfun[k], jGvar[k])</code> whose values the user function computes.</li></ul><p>This example minimizes <span>$(x_1 - 2)^2$</span> without derivatives, so SNOPT estimates them by finite differences. It then changes the starting point and solves again with a hot start.</p><pre><code class="language-julia-repl hljs">julia&gt; using SNOPT
 
-initialize(&quot;&quot;, &quot;&quot;) do workspace
-    set_option!(workspace, &quot;Derivative option&quot;, 0)   # SNOPT estimates the derivatives
+julia&gt; initialize(&quot;&quot;, &quot;&quot;) do workspace
+           set_option!(workspace, &quot;Derivative option&quot;, 0)  # finite differences
+           usrfun = make_usrfun_a((F, x) -&gt; (F[1] = (x[1] - 2.0)^2))
+           problem = SnoptA(workspace,
+                            1, 1,                     # nf, n
+                            0.0, 1,                   # objadd, objrow
+                            Int32[], Int32[], Float64[],   # iAfun, jAvar, A: no linear part
+                            Int32[1], Int32[1],       # iGfun, jGvar: F[1] depends on x[1]
+                            [-10.0], [10.0],          # xlow, xupp
+                            [-1.0e20], [1.0e20],      # flow, fupp: objective row free
+                            [0.0], zeros(Int32, 1), zeros(1),   # x, xstate, xmul
+                            zeros(1), zeros(Int32, 1), zeros(1), # F, Fstate, Fmul
+                            0, 0, 0, 0.0,             # status, nS, num_inf, sum_inf
+                            usrfun)
+           status1 = snopta!(problem)
+           problem.x[1] = 2.1                         # new starting point
+           status2 = snopta!(problem; start = &quot;Hot&quot;)
+           (status1, status2, round(problem.x[1]; digits = 4))
+       end
+(1, 1, 2.0)</code></pre><p><a href="../../api/lowlevel/#SNOPT.snopta!"><code>snopta!</code></a> returns the SNOPT status code (here <code>1</code>, optimal solution found). It writes the solution into <code>problem.x</code>, the row values into <code>problem.F</code>, and the multipliers into <code>problem.xmul</code> and <code>problem.Fmul</code>.</p><p>The option <code>&quot;Derivative option&quot;</code> tells SNOPT which derivatives the user function gives: <code>1</code>, the default, means all of them, and <code>0</code> means that SNOPT estimates the missing ones. To give derivatives, pass <code>eval_G</code> to <a href="../../api/lowlevel/#SNOPT.make_usrfun_a"><code>make_usrfun_a</code></a>: <code>eval_G(G, x)</code> writes the value at position <code>(iGfun[k], jGvar[k])</code> into <code>G[k]</code>.</p><h2 id="SnoptB:-separate-objective-and-constraint-functions"><a class="docs-heading-anchor" href="#SnoptB:-separate-objective-and-constraint-functions"><code>SnoptB</code>: separate objective and constraint functions</a><a id="SnoptB:-separate-objective-and-constraint-functions-1"></a><a class="docs-heading-anchor-permalink" href="#SnoptB:-separate-objective-and-constraint-functions" title="Permalink"></a></h2><p><a href="../../api/lowlevel/#SNOPT.SnoptB"><code>SnoptB</code></a> is the type that <a href="../../api/highlevel/#SNOPT.snopt"><code>snopt</code></a> builds internally. All its constraints are nonlinear, and SNOPT.jl takes the constraints as nonlinear in all <code>n</code> variables (<code>nnJac = n</code>). The arrays <code>x</code>, <code>bl</code>, <code>bu</code> and <code>hs</code> have length <code>n + m_eff</code>: the <code>n</code> variables first, then one <a href="../../concepts/#Slack-variables">slack variable</a> for each of the <code>m_eff</code> constraint rows. A problem without constraints still needs one row with infinite bounds, so <code>m_eff = 1</code>, and this row must be included in the arrays. Its Jacobian pattern <code>J</code> is a <code>1 × n</code> matrix with one entry, because SNOPT needs at least one. <code>J</code> must have the type <code>SparseMatrixCSC{Float64, Int32}</code>; <code>sparse</code> gives this type when the index vectors are <code>Int32</code>.</p><pre><code class="language-julia-repl hljs">julia&gt; using SNOPT
 
-    usrfun = make_usrfun_a((F, x) -&gt; (F[1] = (x[1] - 2.0)^2))
-    problem = SnoptA(workspace,
-                     1, 1,                     # nf, n
-                     0.0, 1,                   # objadd, objrow
-                     Int32[], Int32[], Float64[],   # iAfun, jAvar, A: no linear part
-                     Int32[1], Int32[1],       # iGfun, jGvar: F[1] depends on x[1]
-                     [-10.0], [10.0],          # xlow, xupp
-                     [-1.0e20], [1.0e20],      # flow, fupp: no bounds on the objective row
-                     [0.0], zeros(Int32, 1), zeros(1),   # x, xstate, xmul
-                     zeros(1), zeros(Int32, 1), zeros(1), # F, Fstate, Fmul
-                     0, 0, 0, 0.0,             # status, nS, num_inf, sum_inf
-                     usrfun)
+julia&gt; using SparseArrays
 
-    status1 = snopta!(problem)
+julia&gt; initialize(&quot;&quot;, &quot;&quot;) do workspace
+           n, m_eff = 2, 1
+           objective(x) = (x[1] - 1.0)^2 + (x[2] - 2.0)^2
+           function gradient!(g, x)
+               g[1] = 2.0 * (x[1] - 1.0)
+               g[2] = 2.0 * (x[2] - 2.0)
+               return nothing
+           end
+           objfun = make_objfun(objective, gradient!, workspace.iw)
+           confun = make_dummy_confun()                   # no constraints
+           J = sparse(Int32[1], Int32[1], [0.0], m_eff, n)  # one entry at (1, 1)
+           problem = SnoptB(workspace,
+                            n, 0, m_eff, n,              # n, nc, m_eff, nnobj
+                            zeros(n + m_eff),            # x
+                            [-10.0, -10.0, -1.0e20],     # bl
+                            [10.0, 10.0, 1.0e20],        # bu
+                            zeros(Int32, n + m_eff),     # hs
+                            J,
+                            0.0, 0, Float64[],           # obj_val, status, lambda
+                            objfun, confun)
+           status = snoptb!(problem)
+           (status, round.(problem.x[1:n]; digits = 4))
+       end
+(1, [1.0, 2.0])</code></pre><p>After the solve, <code>problem.x</code>, <code>problem.obj_val</code>, <code>problem.lambda</code> and <code>problem.hs</code> contain the result.</p><h2 id="SnoptC:-one-function-for-objective-and-constraints"><a class="docs-heading-anchor" href="#SnoptC:-one-function-for-objective-and-constraints"><code>SnoptC</code>: one function for objective and constraints</a><a id="SnoptC:-one-function-for-objective-and-constraints-1"></a><a class="docs-heading-anchor-permalink" href="#SnoptC:-one-function-for-objective-and-constraints" title="Permalink"></a></h2><p><a href="../../api/lowlevel/#SNOPT.SnoptC"><code>SnoptC</code></a> has the same arrays as <a href="../../api/lowlevel/#SNOPT.SnoptB"><code>SnoptB</code></a>, but SNOPT calls one function for the objective and the constraints. <a href="../../api/lowlevel/#SNOPT.make_usrfun_c"><code>make_usrfun_c</code></a> builds this function from the same four Julia functions that <a href="../../api/highlevel/#SNOPT.snopt"><code>snopt</code></a> uses. This example minimizes <span>$(x_1 - 2)^2$</span> subject to <span>$x_1 \ge 1$</span>:</p><pre><code class="language-julia-repl hljs">julia&gt; using SNOPT
 
-    problem.x[1] = 2.1                         # new starting point
-    status2 = snopta!(problem; start = &quot;Hot&quot;)
+julia&gt; using SparseArrays
 
-    (status1, status2, round(problem.x[1]; digits = 4))
-end
-
-# output
-
-(1, 1, 2.0)</code></pre><p><a href="../../api/lowlevel/#SNOPT.snopta!"><code>snopta!</code></a> returns the SNOPT status code (here <code>1</code>, optimal solution found). It writes the solution into <code>problem.x</code>, the row values into <code>problem.F</code>, and the multipliers into <code>problem.xmul</code> and <code>problem.Fmul</code>.</p><p>The option <code>&quot;Derivative option&quot;</code> tells SNOPT which derivatives the user function gives: <code>1</code>, the default, means all of them, and <code>0</code> means that SNOPT estimates the missing ones. To give derivatives, pass <code>eval_G</code> to <a href="../../api/lowlevel/#SNOPT.make_usrfun_a"><code>make_usrfun_a</code></a>: <code>eval_G(G, x)</code> writes the value at position <code>(iGfun[k], jGvar[k])</code> into <code>G[k]</code>.</p><h2 id="SnoptB:-separate-objective-and-constraint-functions"><a class="docs-heading-anchor" href="#SnoptB:-separate-objective-and-constraint-functions"><code>SnoptB</code>: separate objective and constraint functions</a><a id="SnoptB:-separate-objective-and-constraint-functions-1"></a><a class="docs-heading-anchor-permalink" href="#SnoptB:-separate-objective-and-constraint-functions" title="Permalink"></a></h2><p><a href="../../api/lowlevel/#SNOPT.SnoptB"><code>SnoptB</code></a> is the type that <a href="../../api/highlevel/#SNOPT.snopt"><code>snopt</code></a> builds internally. All its constraints are nonlinear, and SNOPT.jl takes the constraints as nonlinear in all <code>n</code> variables (<code>nnJac = n</code>). The arrays <code>x</code>, <code>bl</code>, <code>bu</code> and <code>hs</code> have length <code>n + m_eff</code>: the <code>n</code> variables first, then one <a href="../../concepts/#Slack-variables">slack variable</a> for each of the <code>m_eff</code> constraint rows. A problem without constraints still needs one row with infinite bounds, so <code>m_eff = 1</code>, and this row must be included in the arrays. Its Jacobian pattern <code>J</code> is a <code>1 × n</code> matrix with one entry, because SNOPT needs at least one. <code>J</code> must have the type <code>SparseMatrixCSC{Float64, Int32}</code>; <code>sparse</code> gives this type when the index vectors are <code>Int32</code>.</p><pre><code class="language-julia hljs">using SNOPT
-using SparseArrays
-
-initialize(&quot;&quot;, &quot;&quot;) do workspace
-    n, m_eff = 2, 1
-    objective(x) = (x[1] - 1.0)^2 + (x[2] - 2.0)^2
-    function gradient!(g, x)
-        g[1] = 2.0 * (x[1] - 1.0)
-        g[2] = 2.0 * (x[2] - 2.0)
-        return nothing
-    end
-
-    objfun = make_objfun(objective, gradient!, workspace.iw)
-    confun = make_dummy_confun()                   # no constraints
-    J = sparse(Int32[1], Int32[1], [0.0], m_eff, n)  # one entry at (1, 1)
-
-    problem = SnoptB(workspace,
-                     n, 0, m_eff, n,              # n, nc, m_eff, nnobj
-                     zeros(n + m_eff),            # x
-                     [-10.0, -10.0, -1.0e20],     # bl
-                     [10.0, 10.0, 1.0e20],        # bu
-                     zeros(Int32, n + m_eff),     # hs
-                     J,
-                     0.0, 0, Float64[],           # obj_val, status, lambda
-                     objfun, confun)
-
-    status = snoptb!(problem)
-    (status, round.(problem.x[1:n]; digits = 4))
-end
-
-# output
-
-(1, [1.0, 2.0])</code></pre><p>After the solve, <code>problem.x</code>, <code>problem.obj_val</code>, <code>problem.lambda</code> and <code>problem.hs</code> contain the result.</p><h2 id="SnoptC:-one-function-for-objective-and-constraints"><a class="docs-heading-anchor" href="#SnoptC:-one-function-for-objective-and-constraints"><code>SnoptC</code>: one function for objective and constraints</a><a id="SnoptC:-one-function-for-objective-and-constraints-1"></a><a class="docs-heading-anchor-permalink" href="#SnoptC:-one-function-for-objective-and-constraints" title="Permalink"></a></h2><p><a href="../../api/lowlevel/#SNOPT.SnoptC"><code>SnoptC</code></a> has the same arrays as <a href="../../api/lowlevel/#SNOPT.SnoptB"><code>SnoptB</code></a>, but SNOPT calls one function for the objective and the constraints. <a href="../../api/lowlevel/#SNOPT.make_usrfun_c"><code>make_usrfun_c</code></a> builds this function from the same four Julia functions that <a href="../../api/highlevel/#SNOPT.snopt"><code>snopt</code></a> uses. This example minimizes <span>$(x_1 - 2)^2$</span> subject to <span>$x_1 \ge 1$</span>:</p><pre><code class="language-julia hljs">using SNOPT
-using SparseArrays
-
-initialize(&quot;&quot;, &quot;&quot;) do workspace
-    objective(x) = (x[1] - 2.0)^2
-    gradient!(g, x) = (g[1] = 2.0 * (x[1] - 2.0))
-    constraints!(c, x) = (c[1] = x[1])
-    jacobian!(vals, x) = (vals[1] = 1.0)
-
-    J = sparse(Int32[1], Int32[1], [1.0], 1, 1)
-    usrfun = make_usrfun_c(objective, gradient!, constraints!, jacobian!, J,
-                           workspace.iw)
-
-    problem = SnoptC(workspace,
-                     1, 1, 1, 1,                  # n, nc, m_eff, nnobj
-                     [0.0, 0.0],                  # x
-                     [-10.0, 1.0],                # bl: variable, then constraint
-                     [10.0, 1.0e20],              # bu
-                     zeros(Int32, 2),             # hs
-                     J,
-                     0.0, 0, Float64[],           # obj_val, status, lambda
-                     usrfun)
-
-    status = snoptc!(problem)
-    (status, round(problem.x[1]; digits = 4))
-end
-
-# output
-
-(1, 2.0)</code></pre><h2 id="Callback-builders"><a class="docs-heading-anchor" href="#Callback-builders">Callback builders</a><a id="Callback-builders-1"></a><a class="docs-heading-anchor-permalink" href="#Callback-builders" title="Permalink"></a></h2><p>SNOPT calls C functions with a fixed argument list. The builders wrap Julia functions in functions of that form:</p><table><tr><th style="text-align: right">Builder</th><th style="text-align: right">User functions</th><th style="text-align: right">Used by</th></tr><tr><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.make_objfun"><code>make_objfun</code></a></td><td style="text-align: right"><code>eval_obj(x)</code>, <code>eval_grad(g, x)</code></td><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.SnoptB"><code>SnoptB</code></a></td></tr><tr><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.make_confun"><code>make_confun</code></a></td><td style="text-align: right"><code>eval_con(c, x)</code>, <code>eval_jac(vals, x)</code></td><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.SnoptB"><code>SnoptB</code></a></td></tr><tr><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.make_dummy_confun"><code>make_dummy_confun</code></a></td><td style="text-align: right">none (no constraints)</td><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.SnoptB"><code>SnoptB</code></a></td></tr><tr><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.make_usrfun_c"><code>make_usrfun_c</code></a></td><td style="text-align: right">all four of the above</td><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.SnoptC"><code>SnoptC</code></a></td></tr><tr><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.make_usrfun_a"><code>make_usrfun_a</code></a></td><td style="text-align: right"><code>eval_F(F, x)</code>, optional <code>eval_G(G, x)</code></td><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.SnoptA"><code>SnoptA</code></a></td></tr></table><p>The user functions follow the <a href="../../getting_started/#Rules-for-the-callback-functions">rules for callback functions</a>. Each builder accepts the keyword <code>callback</code>, which is called after each evaluation and stops the solve if it returns <code>false</code>, as in <a href="../monitoring/#Monitor-and-stop-a-solve">Monitor and stop a solve</a>. The fields of its <code>NamedTuple</code> argument depend on the builder; the docstring of each builder lists them. To pass <code>snlog</code> or <code>snstop</code>, give them as keywords to the solve function, for example <code>snoptb!(problem; snlog = f)</code>.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../warm_start/">« Warm and hot starts</a><a class="docs-footer-nextpage" href="../../concepts/">Solver concepts »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.19.0 on <span class="colophon-date" title="Sunday 18 October 2026 15:31">Sunday 18 October 2026</span>. Using Julia version 1.13.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+julia&gt; initialize(&quot;&quot;, &quot;&quot;) do workspace
+           objective(x) = (x[1] - 2.0)^2
+           gradient!(g, x) = (g[1] = 2.0 * (x[1] - 2.0))
+           constraints!(c, x) = (c[1] = x[1])
+           jacobian!(vals, x) = (vals[1] = 1.0)
+           J = sparse(Int32[1], Int32[1], [1.0], 1, 1)
+           usrfun = make_usrfun_c(objective, gradient!, constraints!, jacobian!, J,
+                                  workspace.iw)
+           problem = SnoptC(workspace,
+                            1, 1, 1, 1,                  # n, nc, m_eff, nnobj
+                            [0.0, 0.0],                  # x
+                            [-10.0, 1.0],                # bl: variable, then constraint
+                            [10.0, 1.0e20],              # bu
+                            zeros(Int32, 2),             # hs
+                            J,
+                            0.0, 0, Float64[],           # obj_val, status, lambda
+                            usrfun)
+           status = snoptc!(problem)
+           (status, round(problem.x[1]; digits = 4))
+       end
+(1, 2.0)</code></pre><h2 id="Callback-builders"><a class="docs-heading-anchor" href="#Callback-builders">Callback builders</a><a id="Callback-builders-1"></a><a class="docs-heading-anchor-permalink" href="#Callback-builders" title="Permalink"></a></h2><p>SNOPT calls C functions with a fixed argument list. The builders wrap Julia functions in functions of that form:</p><table><tr><th style="text-align: right">Builder</th><th style="text-align: right">User functions</th><th style="text-align: right">Used by</th></tr><tr><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.make_objfun"><code>make_objfun</code></a></td><td style="text-align: right"><code>eval_obj(x)</code>, <code>eval_grad(g, x)</code></td><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.SnoptB"><code>SnoptB</code></a></td></tr><tr><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.make_confun"><code>make_confun</code></a></td><td style="text-align: right"><code>eval_con(c, x)</code>, <code>eval_jac(vals, x)</code></td><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.SnoptB"><code>SnoptB</code></a></td></tr><tr><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.make_dummy_confun"><code>make_dummy_confun</code></a></td><td style="text-align: right">none (no constraints)</td><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.SnoptB"><code>SnoptB</code></a></td></tr><tr><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.make_usrfun_c"><code>make_usrfun_c</code></a></td><td style="text-align: right">all four of the above</td><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.SnoptC"><code>SnoptC</code></a></td></tr><tr><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.make_usrfun_a"><code>make_usrfun_a</code></a></td><td style="text-align: right"><code>eval_F(F, x)</code>, optional <code>eval_G(G, x)</code></td><td style="text-align: right"><a href="../../api/lowlevel/#SNOPT.SnoptA"><code>SnoptA</code></a></td></tr></table><p>The user functions follow the <a href="../../getting_started/#Rules-for-the-callback-functions">rules for callback functions</a>. Each builder accepts the keyword <code>callback</code>, which is called after each evaluation and stops the solve if it returns <code>false</code>, as in <a href="../monitoring/#Monitor-and-stop-a-solve">Monitor and stop a solve</a>. The fields of its <code>NamedTuple</code> argument depend on the builder; the docstring of each builder lists them. To pass <code>snlog</code> or <code>snstop</code>, give them as keywords to the solve function, for example <code>snoptb!(problem; snlog = f)</code>.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../warm_start/">« Warm and hot starts</a><a class="docs-footer-nextpage" href="../../concepts/">Solver concepts »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.19.0 on <span class="colophon-date" title="Sunday 18 October 2026 15:39">Sunday 18 October 2026</span>. Using Julia version 1.13.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
