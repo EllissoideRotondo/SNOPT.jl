@@ -49,17 +49,29 @@ function snmemb(ws::SnoptWorkspace, m::Integer, n::Integer, neJ::Integer,
 end
 
 """
-    snmemb(m, n, neJ, negCon, nnCon, nnObj, nnJac; options=nothing,
-           printfile="", summfile="")
+    snmemb(m, n, neJ, negCon, nnCon, nnObj, nnJac; options = nothing,
+           printfile = "", summfile = "") -> SnoptMemory
 
-Initialize a temporary bootstrap workspace, apply any SNOPT options, and return
-the `snOptB`/`snOptC` memory estimate as a [`SnoptMemory`](@ref).
+Return the minimum workspace sizes that SNOPT needs for an `snOptB` or `snOptC`
+problem.
 
-The dimensions match SNOPT's `snMemB` arguments: `m` total constraint rows, `n`
-variables, `neJ` Jacobian nonzeros, `negCon` nonlinear constraint Jacobian
-nonzeros, `nnCon` nonlinear constraints, `nnObj` nonlinear objective variables,
-and `nnJac` variables that appear nonlinearly in the constraint Jacobian.
+The arguments are the problem dimensions: `m` constraint rows (at least 1), `n`
+variables, `neJ` Jacobian entries, `negCon` nonlinear Jacobian entries, `nnCon`
+nonlinear constraints, `nnObj` nonlinear objective variables and `nnJac` nonlinear
+Jacobian variables. Some options change the sizes, so pass the `options` that the
+solve will use.
 
+`snmemb` opens and closes a temporary workspace, so it closes any open workspace.
+Throws an `ArgumentError` if the dimensions are not consistent.
+
+# Examples
+
+```julia
+memory = snmemb(m, n, neJ, negCon, nnCon, nnObj, nnJac)
+initialize("", "", memory.miniw, memory.minrw) do workspace
+    # Build and solve the problem.
+end
+```
 """
 function snmemb(m::Integer, n::Integer, neJ::Integer, negCon::Integer,
                 nnCon::Integer, nnObj::Integer, nnJac::Integer;

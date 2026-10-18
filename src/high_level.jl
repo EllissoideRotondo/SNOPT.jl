@@ -154,38 +154,72 @@ function preflight_stop_result(stop, n::Int, nc::Int, memory::SnoptMemory)
 end
 
 """
-    snopt(eval_obj, eval_grad, x0; kwargs...) -> SnoptResult
+    snopt(eval_obj, eval_grad, x0; lb = nothing, ub = nothing,
+          eval_con = nothing, eval_jac = nothing, lcon = nothing, ucon = nothing,
+          J = nothing, options = nothing, callback = nothing, snlog = nothing,
+          snstop = nothing, printfile = "", summfile = "", start = "Cold",
+          basis = nothing, name = "Julia") -> SnoptResult
 
-Solve through SNOPT's `snOptB` interface and return a [`SnoptResult`](@ref).
+Minimize `eval_obj(x)` subject to variable bounds and optional nonlinear constraints,
+and return a [`SnoptResult`](@ref).
 
-`eval_obj(x)` returns one real objective value. `eval_grad(gradient, x)` must
-fill every objective-gradient entry. `x0` must be nonempty and finite.
+`snopt` creates a SNOPT workspace of the necessary size, solves the problem with
+SNOPT's `snOptB` interface, and closes the workspace. It does not change `x0` or the
+bound arrays. See [Getting started](@ref) for a tutorial.
 
-Constrained problems require `eval_con`, `eval_jac`, `lcon`, and `ucon`.
-`eval_con(values, x)` fills every constraint value. `eval_jac(nonzeros, x)`
-fills derivatives in the column-major storage order of `J`.
+# Arguments
+
+  - `eval_obj(x)`: return the objective value as a real number.
+  - `eval_grad(g, x)`: write the objective gradient into `g`. Write every entry.
+  - `x0`: starting point, nonempty and finite. Its length `n` is the number of
+    variables.
 
 # Keywords
 
-- `lb`, `ub`: Scalar or vector variable bounds. Bounds may contain `Inf`.
-- `eval_con`, `eval_jac`: In-place constraint and Jacobian callbacks.
-- `lcon`, `ucon`: Constraint bounds with equal lengths.
-- `J`: Optional sparse Jacobian structure. The default structure is dense.
-- `options`: SNOPT settings as a vector of pairs.
-- `callback`: Evaluation event callback. Return `false` to request a stop.
-- `snlog`: [`SnoptMajorLog`](@ref) callback for major-iteration progress.
-- `snstop`: [`SnoptStopEvent`](@ref) callback for custom stopping rules.
-- `start`: `"Cold"` or `"Warm"`. A warm start requires `basis`.
-- `basis`: [`SnoptBasis`](@ref) from a compatible previous result.
-- `printfile`, `summfile`: SNOPT output paths. Empty strings suppress output.
-- `name`: Problem name with at most eight bytes.
+  - `lb`, `ub`: variable bounds. A scalar applies to every variable; a vector has
+    length `n`. `nothing` and `±Inf` mean no bound.
+  - `eval_con(c, x)`: write the `m` constraint values into `c`.
+  - `eval_jac(vals, x)`: write the Jacobian entries into `vals`, in the order of
+    `J.nzval` (column by column).
+  - `lcon`, `ucon`: constraint bounds, vectors of length `m`. Equal values give an
+    equality constraint. Give `eval_con`, `eval_jac`, `lcon` and `ucon` together.
+  - `J`: sparsity pattern of the `m × n` Jacobian as a `SparseMatrixCSC`. The stored
+    values are ignored. `nothing` means that every entry can be nonzero.
+  - `options`: SNOPT options as a vector of `name => value` pairs; see
+    [Set solver options](@ref).
+  - `callback(event)`: called after each evaluation of the objective or the
+    constraints, with a `NamedTuple`.
+  - `snlog(event)`: called once per major iteration with a [`SnoptMajorLog`](@ref).
+  - `snstop(event)`: called once per major iteration with a [`SnoptStopEvent`](@ref).
+  - `start`: `"Cold"`, or `"Warm"` to start from `basis`.
+  - `basis`: [`SnoptBasis`](@ref) of an earlier result with the same `n` and `m`.
+  - `printfile`, `summfile`: paths of the SNOPT log and summary. `""` writes no file.
+  - `name`: problem name in the SNOPT log, at most 8 bytes.
 
-The function rejects `start = "Hot"`. A hot start needs one reused low-level
-workspace. See the [Low-level interface](@ref).
+If `callback`, `snlog` or `snstop` returns `false`, SNOPT stops and the result has the
+status `:User_Requested_Stop`. See [Monitor and stop a solve](@ref).
 
-SNOPT owns one active workspace per process. This function holds the package
-lock across workspace sizing, initialization, options, and the solve.
+Throws an `ArgumentError` for input that is not valid, for example a `NaN` bound, a
+lower bound above its upper bound, an array of the wrong length, an unknown option, a
+`name` longer than 8 bytes or `start = "Hot"`. An error thrown by a user function is
+thrown again after the workspace is closed.
 
+Only one solve runs at a time in a Julia process; a second call waits until the first
+returns. See [Solver concepts](@ref).
+
+# Examples
+
+```julia
+objective(x) = (x[1] - 1.0)^2 + (x[2] - 2.0)^2
+function gradient!(g, x)
+    g[1] = 2.0 * (x[1] - 1.0)
+    g[2] = 2.0 * (x[2] - 2.0)
+    return nothing
+end
+
+result = snopt(objective, gradient!, [0.0, 0.0]; lb = -10.0, ub = 10.0)
+result.x   # ≈ [1.0, 2.0]
+```
 """
 function snopt(eval_obj, eval_grad,
                x0::AbstractVector{<:Real};

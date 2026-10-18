@@ -28,22 +28,25 @@ function start_mode_code_a(start::AbstractString)::Cint
 end
 
 """
-    snopt!(prob::AbstractSnoptProblem; start="Cold", name="Julia", snlog=nothing,
-           snstop=nothing) -> Int
+    snopt!(prob::AbstractSnoptProblem; start = "Cold", name = "Julia",
+           snlog = nothing, snstop = nothing) -> Int
 
-Solve a low-level problem in place, dispatching on its type to [`snopta!`](@ref),
-[`snoptb!`](@ref), or [`snoptc!`](@ref). The problem's result fields (`status`,
-`obj_val`, multipliers, and final `x`) are overwritten and the SNOPT inform code is
-returned. `start` selects the SNOPT start mode (`"Cold"`, `"Warm"`, or `"Hot"`).
-A warm start needs the problem's `hs`/`nS` seeded from a previous solve; a hot
-start additionally reuses factorization state that lives *inside the workspace*,
-so it is only valid when this solve reuses the same [`SnoptWorkspace`](@ref) the
-previous solve ran in — with a fresh workspace SNOPT reads uninitialized memory.
-`name` is the problem name SNOPT prints and must contain at most eight bytes.
-`snlog` is an optional
-major-iteration log callback, and `snstop` is an optional major-iteration
-termination callback; both are honored by all three methods, and supplying either
-routes the solve through SNOPT's matching `snKerA`/`snKerB`/`snKerC` kernel.
+Solve a low-level problem in place and return the SNOPT status code.
+
+Calls [`snopta!`](@ref), [`snoptb!`](@ref) or [`snoptc!`](@ref) for the type of
+`prob`; see these functions for the results that they write into `prob`.
+
+`start` is `"Cold"`, `"Warm"` or `"Hot"`. A warm start uses the basis states and `nS`
+stored in `prob`. A hot start also reuses the basis factorization and the Hessian
+approximation of the previous solve, so it is valid only with the same `prob` and the
+same open workspace.
+`snlog` and `snstop` work as in [`snopt`](@ref). `name` is the problem name in the
+SNOPT log, at most 8 bytes.
+
+Throws an `ArgumentError` if the workspace is closed, if a solve is already running,
+if `start` is not one of the three modes, or if `name` is longer than 8 bytes. An
+error thrown by a user function is thrown again after the solve; the workspace stays
+open.
 """
 function snopt!(prob::SnoptB; start::String = "Cold", name::String = "Julia",
                 snlog=nothing, snstop=nothing)
@@ -51,15 +54,13 @@ function snopt!(prob::SnoptB; start::String = "Cold", name::String = "Julia",
 end
 
 """
-    snoptb!(prob::SnoptB; start="Cold", name="Julia", snlog=nothing,
-            snstop=nothing) -> Int
+    snoptb!(prob::SnoptB; start = "Cold", name = "Julia", snlog = nothing,
+            snstop = nothing) -> Int
 
-Solve a [`SnoptB`](@ref) problem in place through SNOPT's `snOptB` interface and
-return the SNOPT inform code. The final point, objective, and multipliers are written
-back into `prob`. Pass `snlog` to receive a [`SnoptMajorLog`](@ref) at each major
-iteration, or `snstop` to receive a [`SnoptStopEvent`](@ref) and control early
-termination; either one routes the solve through SNOPT's `snKerB`
-reverse-communication kernel. Also reachable through the alias [`snopt!`](@ref).
+Solve `prob` in place with SNOPT's `snOptB` interface and return the SNOPT status code.
+
+After the solve, `prob.x`, `prob.obj_val`, `prob.lambda`, `prob.hs`, `prob.nS` and
+`prob.status` hold the result. The keywords are the same as for [`snopt!`](@ref).
 """
 function snoptb!(prob::SnoptB; start::String = "Cold", name::String = "Julia",
                  snlog=nothing, snstop=nothing)

@@ -4,41 +4,24 @@ CurrentModule = SNOPT
 
 # API reference
 
-```@index
-```
-
-## High-level solve
+## Solve a problem
 
 ```@docs
 snopt
 SnoptResult
 SnoptBasis
-SnoptMajorLog
-SnoptStopEvent
-SnoptMemory
 SNOPT_STATUS
 ```
 
-## Problem types
+## Monitor a solve
 
 ```@docs
-AbstractSnoptProblem
-SnoptB
-SnoptProblem
-SnoptC
-SnoptA
+SnoptMajorLog
+SnoptStopEvent
+snopt_no_progress
 ```
 
-## In-place solvers
-
-```@docs
-snopt!
-snoptb!
-snoptc!
-snopta!
-```
-
-## Workspace, options, and memory
+## Workspace and options
 
 ```@docs
 initialize
@@ -47,26 +30,47 @@ set_option!
 read_options
 specs_status_message
 snmemb
+SnoptMemory
+```
+
+## Low-level problem types
+
+```@docs
+AbstractSnoptProblem
+SnoptA
+SnoptB
+SnoptProblem
+SnoptC
+snopt!
+snopta!
+snoptb!
+snoptc!
 ```
 
 ## Callback builders
 
 ```@docs
+make_usrfun_a
 make_objfun
 make_confun
 make_dummy_confun
 make_usrfun_c
-make_usrfun_a
 make_snlog
 make_snstop
-snopt_no_progress
 ```
 
-## Library loading
+## Library setup
 
-These helpers are not exported; access them as `SNOPT.has_snopt`, etc.
+These functions are not exported. Call them as `SNOPT.has_snopt()` and
+`SNOPT.find_snopt_lib()`.
 
 ```@docs
 SNOPT.has_snopt
 SNOPT.find_snopt_lib
+```
+
+## Index
+
+```@index
+Pages = ["api.md"]
 ```

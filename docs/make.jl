@@ -14,18 +14,24 @@ makedocs(;
     ),
     pages = [
         "Home" => "index.md",
+        "Getting started" => "getting_started.md",
         "Installation" => "installation.md",
-        "High-level interface" => "interface.md",
-        "Low-level interface" => "lowlevel.md",
-        "Examples" => "examples.md",
-        "Troubleshooting" => "troubleshooting.md",
+        "How-to guides" => [
+            "Set solver options" => "howto/options.md",
+            "Monitor and stop a solve" => "howto/monitoring.md",
+            "Warm and hot starts" => "howto/warm_start.md",
+            "Low-level interface" => "howto/lowlevel.md",
+        ],
+        "Solver concepts" => "concepts.md",
         "API reference" => "api.md",
     ],
     # Every exported symbol must appear in an @docs block.
     checkdocs = :exports,
-    # Hosted CI renders the docs without SNOPT. The self-hosted solver job sets
-    # SNOPT_DOCTESTS=true and executes the solver examples.
-    doctest = get(ENV, "SNOPT_DOCTESTS", "false") == "true",
+    # The examples need a licensed SNOPT library, so they run wherever one is found.
+    # Hosted CI has none and only renders the pages. SNOPT_DOCTESTS overrides the
+    # default; the self-hosted job sets it to "true" so a missing library fails.
+    doctest = haskey(ENV, "SNOPT_DOCTESTS") ? ENV["SNOPT_DOCTESTS"] == "true" :
+              SNOPT.has_snopt(),
 )
 
 if get(ENV, "SNOPT_DOCS_DEPLOY", "true") == "true"

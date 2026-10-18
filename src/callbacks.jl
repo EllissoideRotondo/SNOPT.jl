@@ -1,10 +1,11 @@
 """
     snopt_no_progress(event) -> true
 
-No-op progress callback: accepts every event and never requests termination. Use
-it as an explicit "do nothing" value wherever a `callback`/`snlog`/`snstop`
-argument is expected. It is not the default — those keywords default to
-`nothing`, which additionally skips building the event object.
+Return `true` for every event, so the solve never stops.
+
+Pass it as `callback`, `snlog` or `snstop` where a function that never stops the
+solve is needed. The default value `nothing` of these keywords has the same effect and is
+faster, because SNOPT.jl then does not create the event.
 """
 snopt_no_progress(event) = true
 
@@ -498,12 +499,11 @@ end
 """
     make_snlog(callback)
 
-Create a Julia callback compatible with SNOPT's `snLog` hook. `callback` is
-called with a [`SnoptMajorLog`](@ref) after each major-iteration log event.
-Returning `false` requests termination from SNOPT; any other return value lets
-SNOPT continue. The `snlog` hook is available for [`SnoptA`](@ref),
-[`SnoptB`](@ref), and [`SnoptC`](@ref) solves.
+Wrap `callback` in a function that SNOPT can call once per major iteration.
 
+SNOPT.jl calls `callback` with a [`SnoptMajorLog`](@ref). If it returns `false`,
+SNOPT stops. The solve functions call `make_snlog` when they receive the `snlog`
+keyword, so a direct call is rarely necessary.
 """
 function make_snlog(callback)
     state = SnoptCallbackState()
@@ -591,12 +591,12 @@ end
 """
     make_snstop(callback)
 
-Create a Julia callback compatible with SNOPT's `snSTOP` hook. `callback` is
-called with a [`SnoptStopEvent`](@ref) at the end of every major iteration.
-Returning `false` makes SNOPT stop (the solve then reports inform code 74,
-`:User_Requested_Stop`); any other return value lets SNOPT continue. The
-`snstop` hook is available for [`SnoptA`](@ref), [`SnoptB`](@ref), and
-[`SnoptC`](@ref) solves.
+Wrap `callback` in a function that SNOPT can call once per major iteration.
+
+SNOPT.jl calls `callback` with a [`SnoptStopEvent`](@ref). If it returns `false`,
+SNOPT stops with status code 74 (`:User_Requested_Stop`). The solve functions call
+`make_snstop` when they receive the `snstop` keyword, so a direct call is rarely
+necessary.
 """
 function make_snstop(callback)
     state = SnoptCallbackState()
@@ -704,14 +704,18 @@ function make_snstop(callback)
 end
 
 """
-    make_objfun(eval_obj, eval_grad, ws_iw; callback=nothing)
-Create the SNOPT objective callback. If `callback` is provided, it is called as
-`callback(event::NamedTuple)::Bool` after objective-value evaluations. Returning
-`false` requests SNOPT termination. The default `nothing` records no progress
-and avoids per-evaluation event allocation.
-Objective events contain `kind = :objective`, `mode`, `major_iter`,
-`minor_iter`, `x`, and `f`.
+    make_objfun(eval_obj, eval_grad, ws_iw; callback = nothing)
 
+Wrap `eval_obj(x)` and `eval_grad(g, x)` in the objective function of a
+[`SnoptB`](@ref) problem.
+
+`eval_obj(x)` returns the objective value; `eval_grad(g, x)` writes every entry of the
+gradient into `g`. Pass the integer work array `workspace.iw` as `ws_iw`.
+
+If `callback` is a function, it is called after each objective evaluation with a
+`NamedTuple` with the fields `kind = :objective`, `mode`, `major_iter`, `minor_iter`,
+`x` and `f`. If it returns `false`, SNOPT stops. During a solve, `major_iter` and
+`minor_iter` are `0`; use `snlog` for iteration counts.
 """
 function make_objfun(eval_obj, eval_grad,
                      ws_iw::Vector{Int32}; callback=nothing)
@@ -759,14 +763,20 @@ function make_objfun(eval_obj, eval_grad, log_fn::Function,
 end
 
 """
-    make_confun(eval_con, eval_jac, J, ws_iw; callback=nothing)
-Create the SNOPT constraint callback. If `callback` is provided, it is called as
-`callback(event::NamedTuple)::Bool` after constraint-value evaluations.
-Returning `false` requests SNOPT termination.
-Constraint events contain `kind = :constraint`, `mode`, `major_iter`,
-`minor_iter`, `x`, and `c`. The default `nothing` records no progress and avoids
-per-evaluation event allocation.
+    make_confun(eval_con, eval_jac, J, ws_iw; callback = nothing)
+    make_confun(eval_con, eval_jac, J)
 
+Wrap `eval_con(c, x)` and `eval_jac(vals, x)` in the constraint function of a
+[`SnoptB`](@ref) problem.
+
+`eval_con(c, x)` writes every constraint value into `c`. `eval_jac(vals, x)` writes
+the Jacobian entries into `vals`, in the order of `J.nzval`. Pass the integer work
+array `workspace.iw` as `ws_iw`.
+
+If `callback` is a function, it is called after each constraint evaluation with a
+`NamedTuple` with the fields `kind = :constraint`, `mode`, `major_iter`,
+`minor_iter`, `x` and `c`. If it returns `false`, SNOPT stops. During a solve,
+`major_iter` and `minor_iter` are `0`; use `snlog` for iteration counts.
 """
 function make_confun(eval_con, eval_jac, J,
                      ws_iw::Vector{Int32}; callback=nothing)
@@ -813,16 +823,19 @@ make_confun(eval_con, eval_jac, J) =
     make_confun(eval_con, eval_jac, J, Int32[])
 
 """
-    make_usrfun_a(eval_F; eval_G=nothing, callback=nothing)
-Create the combined callback used by SNOPT-A. `eval_F(F, x)` fills the
-objective/constraint row values. If derivatives are requested, `eval_G(G, x)`
-fills the nonlinear derivative values in the order specified by `iGfun` and
-`jGvar`. Returning `false` from `callback(event)` requests SNOPT termination.
+    make_usrfun_a(eval_F; eval_G = nothing, callback = nothing)
 
-If `eval_G` is `nothing`, gradient requests from SNOPT are left for SNOPT to
-fill by finite differences. This requires SNOPT to be configured for
-finite-difference gradients via `set_option!(ws, "Derivative option", 0)`.
+Wrap `eval_F(F, x)` and `eval_G(G, x)` in the user function of a [`SnoptA`](@ref)
+problem.
 
+`eval_F(F, x)` writes every row value into `F`. `eval_G(G, x)` writes the derivative
+at position `(iGfun[k], jGvar[k])` into `G[k]`. If `eval_G` is `nothing`, SNOPT
+estimates the derivatives by finite differences; then set the option
+`"Derivative option"` to `0`.
+
+If `callback` is a function, it is called after each evaluation of `F` with a
+`NamedTuple` with the fields `kind = :function`, `x` and `F`. If it returns `false`,
+SNOPT stops.
 """
 function make_usrfun_a(eval_F; eval_G=nothing, callback=nothing)
     state = SnoptCallbackState()
@@ -864,18 +877,21 @@ function make_usrfun_a(eval_F; eval_G=nothing, callback=nothing)
 end
 
 """
-    make_usrfun_c(eval_obj, eval_grad, eval_con, eval_jac, J, ws_iw; callback=nothing)
+    make_usrfun_c(eval_obj, eval_grad, eval_con, eval_jac, J, ws_iw; callback = nothing)
+    make_usrfun_c(eval_obj, eval_grad, eval_con, eval_jac, J)
 
-Create the combined callback used by SNOPT-C. This is the SNOPT-C equivalent
-of [`make_objfun`](@ref) plus [`make_confun`](@ref): `eval_obj(x)` returns the
-objective, `eval_grad(g, x)` fills the objective gradient, `eval_con(c, x)` fills
-constraint values, and `eval_jac(jnz, x)` fills the nonlinear constraint Jacobian
-nonzeros in the column-major order of `J`.
+Wrap the objective and constraint functions in the user function of a
+[`SnoptC`](@ref) problem.
 
-If `callback` is provided, it is called with a combined evaluation event containing
-`kind = :combined`, `mode`, `major_iter`, `minor_iter`, `x`, `f`, and `c`.
-Returning `false` requests SNOPT termination.
+The four functions have the same form as in [`snopt`](@ref): `eval_obj(x)` returns the
+objective, `eval_grad(g, x)` writes the gradient, `eval_con(c, x)` writes the
+constraint values, and `eval_jac(vals, x)` writes the Jacobian entries in the order of
+`J.nzval`. Pass `workspace.iw` as `ws_iw`.
 
+If `callback` is a function, it is called after each evaluation with a `NamedTuple`
+with the fields `kind = :combined`, `mode`, `major_iter`, `minor_iter`, `x`, `f` and
+`c`. If it returns `false`, SNOPT stops. During a solve, `major_iter` and `minor_iter`
+are `0`; use `snlog` for iteration counts.
 """
 function make_usrfun_c(eval_obj, eval_grad,
                        eval_con, eval_jac, J,
@@ -938,9 +954,10 @@ end
 """
     make_dummy_confun()
 
-Create a no-op SNOPT-B constraint callback for unconstrained problems (`nc == 0`).
-SNOPT still expects a constraint-function pointer even when there are no nonlinear
-constraints; this returns one that does nothing. Used internally by [`snopt`](@ref).
+Return a constraint function that does nothing, for a [`SnoptB`](@ref) problem without
+constraints.
+
+SNOPT needs a constraint function even when there are no nonlinear constraints.
 """
 function make_dummy_confun()
     function dummy_confun(_::Ptr{Cint}, _::Ptr{Cint}, _::Ptr{Cint}, _::Ptr{Cint},

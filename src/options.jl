@@ -60,21 +60,19 @@ function apply_options!(ws::SnoptWorkspace, options)
 end
 
 """
-    set_option!(prob, "Keyword string value")
-    set_option!(prob, "Keyword string", value::Integer)
-    set_option!(prob, "Keyword string", value::Real)
+    set_option!(ws, option::String) -> Int
+    set_option!(ws, name::String, value::Real) -> Int
 
-Set a single SNOPT option on `prob` (a [`SnoptWorkspace`](@ref) or any
-[`AbstractSnoptProblem`](@ref)). The function calls SNOPT's native option
-routine and returns `0` on success. SNOPT parse errors raise `ArgumentError`.
-The workspace must be open. Set options before or after a solve.
+Set one SNOPT option in the workspace `ws` and return `0`.
 
-The one-string form sets a complete option such as `"Hessian limited memory"`.
-The other forms accept integer or finite real values. Boolean values are
-rejected because Julia treats them as integers.
+`ws` is an open [`SNOPT.SnoptWorkspace`](@ref) or a low-level problem. The first
+form takes the full option text, for example `"Hessian limited memory"`. The second
+form takes the option name and a number, for example
+`set_option!(ws, "Major iterations limit", 500)`.
 
-For [`snopt`](@ref), pass options as a vector of pairs. Use
-[`read_options`](@ref) to read a specs file.
+Throws an `ArgumentError` if SNOPT does not accept the option, if `value` is a `Bool`
+or not finite, or if the workspace is closed. To set options in [`snopt`](@ref), use
+its `options` keyword instead; see [Set solver options](@ref).
 """
 set_option!(prob::Union{SnoptA, SnoptB, SnoptC}, args...) = set_option!(prob.ws, args...)
 

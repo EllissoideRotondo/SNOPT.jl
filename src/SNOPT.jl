@@ -40,14 +40,18 @@ end
 """
     find_snopt_lib() -> String
 
-Search for a loadable `libsnopt7` and return its absolute path, or an empty string
-if none is found. The search checks `SNOPTDIR` first (warning if it is set but the
-library there cannot be loaded), then the platform library path
-(`LD_LIBRARY_PATH`, also `DYLD_LIBRARY_PATH` on macOS, or `PATH` on Windows), and
-finally the system loader's default search paths (for example `/usr/lib` via
-`ld.so` on Linux). This is run once during `__init__` to set the global
-`SNOPT.libsnopt7`; call it directly to diagnose why a library is not being picked
-up. See also [`has_snopt`](@ref).
+Search for a usable `libsnopt7` and return its absolute path, or `""` if none is found.
+
+A library is usable if it loads and contains every C function that SNOPT.jl calls.
+The search checks, in order: the directory in `SNOPTDIR`; the directories in
+`LD_LIBRARY_PATH`, `DYLD_LIBRARY_PATH` (macOS) or `PATH` (Windows); and the default
+locations of the system loader. If `SNOPTDIR` is set but contains no usable library,
+a warning is shown.
+
+SNOPT.jl runs this search once when the package loads and stores the result in
+`SNOPT.libsnopt7`. A later call does not change `SNOPT.libsnopt7`; use it to diagnose
+a library setup problem, and restart Julia after the correction. See also
+[`SNOPT.has_snopt`](@ref).
 """
 function find_snopt_lib()
     libname = string("lib", "snopt7", ".", Libdl.dlext)
@@ -106,11 +110,10 @@ end
 """
     has_snopt() -> Bool
 
-Return `true` if a usable SNOPT library was located and loaded during module
-initialization. When this is `false`, the resolved path in the global
-`SNOPT.libsnopt7` is empty and any solve raises an error explaining how to provide
-the library; see
-[`find_snopt_lib`](@ref) to diagnose.
+Return `true` if SNOPT.jl found a usable SNOPT library when the package was loaded.
+
+If this is `false`, each solve throws an error. Use [`SNOPT.find_snopt_lib`](@ref)
+to find the cause, and see [Troubleshooting](@ref).
 """
 has_snopt() = !isempty(libsnopt7)
 

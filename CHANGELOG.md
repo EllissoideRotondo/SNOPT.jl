@@ -4,7 +4,7 @@
 
 ### Breaking
 
-- Minimum Julia version is now 1.10 (1.9 reached end of life).
+- Minimum Julia version is now 1.11.
 - The high-level `snopt` rejects `start = "Hot"` with an `ArgumentError`.
   SNOPT's hot start reuses factorization state stored inside the previous
   solve's workspace; the high-level entry point builds a fresh workspace per

@@ -149,13 +149,14 @@ function snopt_output_files(printfile::String, summfile::String)
 end
 
 """
-    SNOPT_STATUS
+    SNOPT_STATUS::Dict{Int, Symbol}
 
-Mapping from SNOPT integer inform codes to descriptive `Symbol`s (for example
-`1 => :Solve_Succeeded`, `31 => :Maximum_Iterations_Exceeded`,
-`11 => :Infeasible_Problem_Detected`). The `status_symbol` field of a
-[`SnoptResult`](@ref) is produced by looking the inform code up here, defaulting to
-`:Unknown_Status` for unmapped codes.
+Map each SNOPT status code to a `Symbol` for its group, for example
+`1 => :Solve_Succeeded` and `31 => :Maximum_Iterations_Exceeded`.
+
+[`snopt`](@ref) uses this map to set `status_symbol` in the [`SnoptResult`](@ref). A
+code that is not in the map gives `:Unknown_Status`. [Solver concepts](@ref) lists
+all groups.
 """
 const SNOPT_STATUS = Dict(
     1  => :Solve_Succeeded,
@@ -202,20 +203,25 @@ const SNOPT_STATUS = Dict(
     999 => :Internal_Error)
 
 """
-    initialize(printfile, summfile)
-    initialize(printfile, summfile, leniw, lenrw)
-    initialize(f, printfile, summfile[, leniw, lenrw])
+    initialize(printfile, summfile, leniw = 30500, lenrw = 60000) -> SnoptWorkspace
+    initialize(f, printfile, summfile, leniw = 30500, lenrw = 60000)
 
-Create and initialize the process-wide SNOPT workspace.
+Open a SNOPT workspace with work arrays of length `leniw` (integer) and `lenrw`
+(real), and return it.
 
-`printfile` and `summfile` select SNOPT output paths. Empty strings suppress
-visible output. `leniw` and `lenrw` set the integer and real work-array lengths.
-Both lengths must be at least 500.
+`printfile` and `summfile` are the paths of the SNOPT log and summary; `""` writes no
+file. Both lengths must be at least 500. Use [`snmemb`](@ref) to find the sizes for a
+large problem.
 
-The default overload uses `leniw = 30500` and `lenrw = 60000`. Use
-[`snmemb`](@ref) to size larger or denser problems.
+The second form calls `f(workspace)` and returns its value. It closes the workspace
+when `f` returns and also when `f` throws an error, which it then throws again. After
+the first form, close the workspace with `close`.
 
-The function form closes the workspace when the block exits:
+Only one workspace can be open in a Julia process, so `initialize` closes the
+previous workspace. Do not call `initialize` from a callback function during a solve.
+Throws an error if the SNOPT library is not loaded.
+
+# Examples
 
 ```julia
 initialize("", "") do workspace
@@ -223,11 +229,6 @@ initialize("", "") do workspace
     # Build and solve a low-level problem.
 end
 ```
-
-Calling `initialize` closes any previous active workspace. Workspace creation
-and solves are serialized within each Julia process. Callbacks must not create,
-close, configure, or solve workspaces until the current solve returns.
-
 """
 function initialize(printfile::String, summfile::String)
     initialize(printfile, summfile, 30500, 60000)

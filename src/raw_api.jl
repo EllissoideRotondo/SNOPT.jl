@@ -1,9 +1,10 @@
 """
     specs_status_message(info::Int) -> String
 
-Return a human-readable description of the inform code returned by [`read_options`](@ref)
-when reading a SNOPT specs file (e.g. `101` is success; codes above `134` indicate that
-`info - 134` errors were found while parsing).
+Return a description of the status code `info` from [`read_options`](@ref).
+
+`101` means that SNOPT read the specs file without errors. A code `info > 134` means
+that SNOPT found `info - 134` errors in the file.
 """
 function specs_status_message(info::Int)
     info == 101 && return "Specs file read successfully."
@@ -16,13 +17,16 @@ function specs_status_message(info::Int)
 end
 
 """
-    read_options(prob, specsfile::String) -> Int
+    read_options(ws, specsfile::String) -> Int
 
-Read a SNOPT specs (options) file into the workspace of `prob` (a
-[`SnoptWorkspace`](@ref) or any [`AbstractSnoptProblem`](@ref)) via SNOPT's `snSpecf`,
-and return the resulting inform code. A warning is emitted unless the file is read
-cleanly (`101`); see [`specs_status_message`](@ref) for the code meanings. Use this as
-an alternative to passing options programmatically through [`set_option!`](@ref).
+Read SNOPT options from the specs file `specsfile` into the workspace `ws`, and return
+the SNOPT status code.
+
+`ws` is an open [`SNOPT.SnoptWorkspace`](@ref) or a low-level problem. The status
+code is `101` if SNOPT read the file without errors; otherwise SNOPT.jl shows a
+warning, and [`specs_status_message`](@ref) explains the code. Throws an
+`ArgumentError` if the file does not exist. See [Set solver options](@ref) for the
+file format.
 """
 function read_options(prob::SnoptWorkspace, specsfile::String)
     return lock(SNOPT_LOCK) do
@@ -86,17 +90,17 @@ kernel_callback_pointer(callback, ptr::Base.RefValue{Ptr{Cvoid}}) =
     callback === nothing ? Ptr{Cvoid}(C_NULL) : snopt_callback_pointer(ptr)
 
 """
-    snopta!(prob::SnoptA; start="Cold", name="Julia", snlog=nothing,
-            snstop=nothing) -> Int
+    snopta!(prob::SnoptA; start = "Cold", name = "Julia", snlog = nothing,
+            snstop = nothing) -> Int
 
-Solve a [`SnoptA`](@ref) problem in place through SNOPT's `snOptA` interface and
-return the SNOPT inform code. The final point is written into `prob.x`, multipliers
-into `prob.xmul`/`prob.Fmul`, and the row values into `prob.F`. If the problem was
-built without a derivative function, SNOPT must be configured for finite-difference
-gradients (`set_option!(ws, "Derivative option", 0)`). Pass `snlog` to receive a
-[`SnoptMajorLog`](@ref) at each major iteration, or `snstop` to receive a
-[`SnoptStopEvent`](@ref) and control early termination; either one routes the
-solve through SNOPT's `snKerA` kernel.
+Solve `prob` in place with SNOPT's `snOptA` interface and return the SNOPT status code.
+
+After the solve, `prob.x`, `prob.F`, `prob.xmul`, `prob.Fmul`, `prob.xstate`,
+`prob.Fstate` and `prob.status` hold the result. The keywords are the same as for
+[`snopt!`](@ref). If `prob.usrfun` gives no derivatives, set the option
+`"Derivative option"` to `0` before the solve.
+
+Throws a `DimensionMismatch` if the array lengths in `prob` do not agree.
 """
 function snopta!(prob::SnoptA; start::String = "Cold", name::String = "Julia",
                  snlog=nothing, snstop=nothing)
@@ -375,14 +379,13 @@ function snoptb_locked!(prob::SnoptWorkspace, start::String, name::String,
 end
 
 """
-    snoptc!(prob::SnoptC; start="Cold", name="Julia", snlog=nothing,
-            snstop=nothing) -> Int
+    snoptc!(prob::SnoptC; start = "Cold", name = "Julia", snlog = nothing,
+            snstop = nothing) -> Int
 
-Solve a [`SnoptC`](@ref) problem in place through SNOPT's `snOptC` interface and
-return the SNOPT inform code. The final point, objective, and multipliers are written
-back into `prob`. Pass `snlog` to receive a [`SnoptMajorLog`](@ref) at each major
-iteration, or `snstop` to receive a [`SnoptStopEvent`](@ref) and control early
-termination; either one routes the solve through SNOPT's `snKerC` kernel.
+Solve `prob` in place with SNOPT's `snOptC` interface and return the SNOPT status code.
+
+After the solve, `prob.x`, `prob.obj_val`, `prob.lambda`, `prob.hs`, `prob.nS` and
+`prob.status` hold the result. The keywords are the same as for [`snopt!`](@ref).
 """
 function snoptc!(prob::SnoptC; start::String = "Cold", name::String = "Julia",
                  snlog=nothing, snstop=nothing)

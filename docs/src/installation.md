@@ -4,120 +4,148 @@ CurrentModule = SNOPT
 
 # Installation
 
+SNOPT.jl needs two parts: the Julia package, installed with the package manager, and
+the SNOPT shared library, available from the SNOPT distributors. This page
+explains how to connect the two and how to check the result.
+
 ## Requirements
 
-Install Julia 1.10 or later. Obtain a licensed SNOPT 7.7 shared library that
-includes the C API provided by
-[snopt-interface](https://github.com/snopt/snopt-interface).
+- Julia 1.11 or later.
+- A licensed SNOPT 7.7 shared library, `libsnopt7`, that includes the C interface
+  from [snopt-interface](https://github.com/snopt/snopt-interface).
 
-SNOPT.jl reads iteration and timing data from the SNOPT 7.7 workspace layout.
-Other versions may use different layouts and report incorrect statistics.
+SNOPT.jl reads the iteration counts and the solve time from fixed positions in the
+SNOPT 7.7 workspace. With another SNOPT version, a solve can be correct while these
+values are wrong.
 
-## Add the package
-
-Install SNOPT.jl with Julia's package manager:
+## Install the package
 
 ```julia
-import Pkg
+using Pkg
 Pkg.add("SNOPT")
 ```
 
-To install from source:
+To use the development version:
 
 ```julia
-import Pkg
+using Pkg
 Pkg.develop(url = "https://github.com/EllissoideRotondo/SNOPT.jl")
 ```
 
-The package loads without the SNOPT library. [`SNOPT.has_snopt`](@ref) then
-returns `false`, and solve attempts report a setup error.
+The package loads without the SNOPT library. In that case
+[`SNOPT.has_snopt`](@ref) returns `false`, and each solve throws an error that
+explains how to make the library available.
 
-## Provide the shared library
+## Make the library available
 
-| Platform | Filename |
+The library file has a different name on each platform:
+
+| Platform | File name |
 | --- | --- |
 | Linux | `libsnopt7.so` |
-| Intel macOS | `libsnopt7.dylib` |
+| macOS (Intel) | `libsnopt7.dylib` |
 | Windows | `libsnopt7.dll` |
 
-Set `SNOPTDIR` to the directory containing that file.
+Set the environment variable `SNOPTDIR` to the directory that contains this file.
+Do this before you start Julia.
 
-Linux and macOS:
+Linux and macOS (bash or zsh):
 
 ```bash
 export SNOPTDIR=/path/to/snopt/lib
 ```
 
-Windows PowerShell:
+Windows (PowerShell):
 
 ```powershell
 $env:SNOPTDIR = "C:\path\to\snopt\lib"
 ```
 
-Set the variable before `using SNOPT`. Restart Julia after changing it.
+SNOPT.jl looks for the library once, when you load the package. If you change
+`SNOPTDIR` later, restart Julia.
 
-Some licenses also require `SNOPT_LICENSE`. Follow the instructions supplied
-with your SNOPT distribution.
+Some SNOPT licenses also need the variable `SNOPT_LICENSE`. Follow the instructions
+that come with your SNOPT distribution.
 
-## Required C interface
+### Search order
 
-The library must export the `f_*` functions from
-[snopt-interface](https://github.com/snopt/snopt-interface). Examples include
-`f_sninitx`, `f_snoptb`, and `f_snkera`.
+SNOPT.jl accepts the first library that it can load and that contains all the C
+functions it needs. It looks in these places, in this order:
 
-Vendor libraries usually contain these functions. A library built only from
-the Fortran source usually does not. SNOPT.jl checks every required function
-before accepting a library.
+1. The directory in `SNOPTDIR`. If `SNOPTDIR` is set but the library there cannot be
+   used, SNOPT.jl shows a warning and continues.
+2. The directories in `LD_LIBRARY_PATH` (Linux and macOS), `DYLD_LIBRARY_PATH`
+   (macOS) or `PATH` (Windows).
+3. The default locations of the system loader, for example `/usr/lib` on Linux.
 
-## Fallback search paths
+If a file `libiomp5` (the Intel OpenMP runtime library) is in the same directory as
+`libsnopt7`, SNOPT.jl also loads it. If that fails, SNOPT.jl continues without it.
 
-If `SNOPTDIR` is unset or unusable, SNOPT.jl checks platform library paths next.
+## Check the setup
 
-Linux:
-
-```bash
-export LD_LIBRARY_PATH=/path/to/snopt/lib:$LD_LIBRARY_PATH
-```
-
-macOS:
-
-```bash
-export DYLD_LIBRARY_PATH=/path/to/snopt/lib:$DYLD_LIBRARY_PATH
-```
-
-Windows uses `PATH`. The system loader also checks its default locations.
-
-If `libiomp5` is beside `libsnopt7`, SNOPT.jl tries to preload it.
-`libiomp5` is an OpenMP runtime library. Failure to preload it does not stop
-library discovery.
-
-## Verify the setup
-
-Run from the environment where you installed SNOPT:
+This command prints the path of the library that SNOPT.jl found. If you installed
+SNOPT.jl in a project environment, add `--project=/path/to/project` after `julia`.
 
 ```bash
 julia -e 'using SNOPT; @assert SNOPT.has_snopt(); println(SNOPT.libsnopt7)'
 ```
 
-For more detail, inspect:
+In PowerShell:
+
+```powershell
+julia -e "using SNOPT; @assert SNOPT.has_snopt(); println(SNOPT.libsnopt7)"
+```
+
+Then solve the first problem in [Getting started](@ref).
+
+## Platform support
+
+| Platform | Status |
+| --- | --- |
+| Linux | Supported and tested. |
+| Windows | Supported with a MinGW build of `libsnopt7.dll`. |
+| macOS (Intel) | Expected to work. Not tested. |
+| macOS (Apple silicon) | Not supported. |
+
+## Troubleshooting
+
+Start with the values that SNOPT.jl sees:
 
 ```julia
 using SNOPT
 
-SNOPT.has_snopt()
-SNOPT.libsnopt7
-SNOPT.find_snopt_lib()
+SNOPT.has_snopt()        # true if a usable library was found
+SNOPT.libsnopt7          # path of that library, or ""
+SNOPT.find_snopt_lib()   # repeat the search now
 ```
 
-`find_snopt_lib()` repeats the search and returns a path or an empty string.
-It does not update `SNOPT.libsnopt7`. Restart Julia after correcting the library setup.
+[`SNOPT.find_snopt_lib`](@ref) does not change `SNOPT.libsnopt7`. After you correct
+the setup, restart Julia.
 
-## Platform notes
+### `has_snopt()` returns `false`
 
-- Linux is tested with a compatible `libsnopt7.so`.
-- Intel macOS is expected to work, but is not tested by the maintainers.
-- Apple Silicon is not currently supported.
-- Windows requires a MinGW-built `libsnopt7.dll`.
+- Make sure that `SNOPTDIR` is the directory that contains the library, not the path
+  of the library file.
+- Make sure that your user can read the file.
+- If `find_snopt_lib()` also returns `""`, no directory in the search order contains
+  a usable library.
 
-The vendor's Intel-built Windows library has an incompatible calling convention.
-Use the MinGW build or Windows Subsystem for Linux.
+### The library exists but does not load
+
+The system loader cannot load the library, or the library does not contain the C
+interface. On Linux, `ldd /path/to/libsnopt7.so` lists the shared libraries that are
+missing.
+
+SNOPT.jl needs the C functions from
+[snopt-interface](https://github.com/snopt/snopt-interface), for example `f_sninitx`,
+`f_snoptb` and `f_snkera`. SNOPT.jl checks for all of them before it accepts a
+library. A library built only from the Fortran source does not contain these
+functions. Use a SNOPT distribution that includes the C interface, or build SNOPT
+again with snopt-interface.
+
+### Windows
+
+SNOPT.jl needs a `libsnopt7.dll` built with MinGW, the GNU compiler for Windows. The
+library built with the Intel compiler for Visual Studio passes arguments in a
+different way and does not work with SNOPT.jl. If you only have a Linux library, use
+the Windows Subsystem for Linux (WSL).
