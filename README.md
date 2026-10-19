@@ -1,6 +1,7 @@
 # SNOPT.jl
 
 [![CI](https://github.com/EllissoideRotondo/SNOPT.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/EllissoideRotondo/SNOPT.jl/actions/workflows/CI.yml)
+[![codecov](https://codecov.io/gh/EllissoideRotondo/SNOPT.jl/graph/badge.svg)](https://codecov.io/gh/EllissoideRotondo/SNOPT.jl)
 [![docs](https://img.shields.io/badge/docs-dev-blue.svg)](https://EllissoideRotondo.github.io/SNOPT.jl/dev/)
 
 SNOPT.jl is an unofficial Julia interface to
