@@ -104,6 +104,7 @@ end
     @test collect(Int.(instances(SnoptStatus.T))) == [0; guide_codes]
     @test SNOPT.status_from_code(51) === SnoptStatus.IncorrectObjectiveDerivatives
     @test SNOPT.status_from_code(4) === SnoptStatus.Unknown
-    @test Base.ispublic(SNOPT, :status_from_code)
+    VERSION >= v"1.11" && @test Base.ispublic(SNOPT, :status_from_code)
+    VERSION >= v"1.11" && @test Base.ispublic(SNOPT, :has_snopt)
     @test repr("text/plain", SnoptStatus.Optimal) == "SnoptStatus.Optimal = 1"
 end

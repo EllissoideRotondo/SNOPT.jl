@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.1
+
+### Changed
+
+- Added support for Julia 1.10. On Julia 1.10, the names that are `public` on
+  later versions are ordinary unexported names.
+- The documented function `has_snopt` is declared `public`.
+
 ## 1.0.0
 
 ### Breaking

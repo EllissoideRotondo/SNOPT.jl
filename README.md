@@ -20,7 +20,7 @@ with [Optimization.jl](https://docs.sciml.ai/Optimization/stable/) instead.
 
 ## Installation
 
-SNOPT.jl needs Julia 1.11 or later and a licensed SNOPT 7.7 library, `libsnopt7`,
+SNOPT.jl needs Julia 1.10 or later and a licensed SNOPT 7.7 library, `libsnopt7`,
 that includes the [snopt-interface](https://github.com/snopt/snopt-interface) C
 functions. SNOPT.jl does not include SNOPT; the library and the license are
 available from the SNOPT distributors.

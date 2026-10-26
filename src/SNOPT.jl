@@ -152,7 +152,10 @@ export make_confun
 export make_dummy_confun
 export snopt_no_progress
 export SnoptStatus
-public status_from_code
+# `public` is a keyword from Julia 1.11 on; Julia 1.10 cannot parse it.
+@static if VERSION >= v"1.11.0-DEV.469"
+    eval(Meta.parse("public status_from_code, has_snopt"))
+end
 export specs_status_message
 
 end

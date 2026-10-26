@@ -10,7 +10,7 @@ explains how to connect the two and how to check the result.
 
 ## Requirements
 
-- Julia 1.11 or later.
+- Julia 1.10 or later.
 - A licensed SNOPT 7.7 shared library, `libsnopt7`, that includes the C interface
   from [snopt-interface](https://github.com/snopt/snopt-interface).
 
