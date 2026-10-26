@@ -386,8 +386,9 @@ end
 """
     SnoptMajorLog
 
-State of the solve at the end of a major iteration, passed to `snlog`. Return `false`
-to stop the solve. The arrays are copies; most values refer to SNOPT's scaled problem.
+State of the solve at the end of a major iteration, passed to `snlog`. SNOPT ignores
+the return value of `snlog`; use `snstop` to stop the solve. The arrays are copies;
+most values refer to SNOPT's scaled problem.
 See [Monitor and stop a solve](@ref).
 
 # Fields

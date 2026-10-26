@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- The documentation of `snlog` stated that a return value of `false` stops the solve.
+  SNOPT ignores the return value of `snlog`; only `snstop` and `callback` can stop
+  the solve. The documentation now also states that `snlog` replaces SNOPT's
+  major-iteration lines in the print and summary files.
+
 ## 1.0.1
 
 ### Changed

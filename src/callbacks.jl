@@ -3,8 +3,8 @@
 
 Return `true` for every event, so the solve never stops.
 
-Pass it as `callback`, `snlog` or `snstop` where a function that never stops the
-solve is needed. The default value `nothing` of these keywords has the same effect and is
+Pass it as `callback` or `snstop` where a function that never stops the solve is
+needed. The default value `nothing` of these keywords has the same effect and is
 faster, because SNOPT.jl then does not create the event.
 """
 snopt_no_progress(event) = true
@@ -501,9 +501,12 @@ end
 
 Wrap `callback` in a function that SNOPT can call once per major iteration.
 
-SNOPT.jl calls `callback` with a [`SnoptMajorLog`](@ref). If it returns `false`,
-SNOPT stops. The solve functions call `make_snlog` when they receive the `snlog`
-keyword, so a direct call is rarely necessary.
+SNOPT.jl calls `callback` with a [`SnoptMajorLog`](@ref). The function replaces
+SNOPT's routine `snLog`, which writes the major-iteration lines of the print and
+summary files, so these files have no such lines. SNOPT ignores the return value of
+`callback`; use [`make_snstop`](@ref) to stop the solve. An exception from `callback`
+is thrown again after the solve ends. The solve functions call `make_snlog` when they
+receive the `snlog` keyword, so a direct call is rarely necessary.
 """
 function make_snlog(callback)
     state = SnoptCallbackState()

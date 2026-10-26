@@ -5,20 +5,22 @@ CurrentModule = SNOPT
 # Monitor and stop a solve
 
 [`snopt`](@ref) accepts three optional functions that SNOPT.jl calls during the
-solve. Each function receives one argument that describes the current state. If a
-function returns `false`, SNOPT stops the solve; any other return value lets the solve
-continue.
+solve. Each function receives one argument that describes the current state. If
+`snstop` or `callback` returns `false`, SNOPT stops the solve; any other return value
+lets the solve continue. SNOPT ignores the return value of `snlog`.
 
-| Keyword | Called | Argument |
-| --- | --- | --- |
-| `snlog` | Once per major iteration | [`SnoptMajorLog`](@ref) |
-| `snstop` | Once per major iteration | [`SnoptStopEvent`](@ref) |
-| `callback` | After each evaluation of the objective or the constraints | `NamedTuple` |
+| Keyword | Called | Argument | Can stop the solve |
+| --- | --- | --- | --- |
+| `snlog` | Once per major iteration | [`SnoptMajorLog`](@ref) | No |
+| `snstop` | Once per major iteration | [`SnoptStopEvent`](@ref) | Yes |
+| `callback` | After each evaluation of the objective or the constraints | `NamedTuple` | Yes |
 
-Use `snlog` to print or record progress. Use `snstop` for a stopping rule that needs
-gradients or multipliers. Use `callback` only when you need every function evaluation:
-SNOPT evaluates the functions several times per major iteration, so this function is
-called much more often.
+Use `snlog` to print or record progress. It takes the place of SNOPT's own
+major-iteration log, so the print and summary files have no iteration lines when
+`snlog` is given. Use `snstop` to stop the solve, or to read the gradients or the
+multipliers; it does not change the files. Use `callback` only when you need every
+function evaluation: SNOPT evaluates the functions several times per major iteration,
+so this function is called much more often.
 
 ## Print progress
 
@@ -28,7 +30,6 @@ result = snopt(objective, gradient!, x0;
                    println("iteration ", event.major_iter,
                            ": f = ", event.objective,
                            ", infeasibility = ", event.primal_infeasibility)
-                   return true
                end)
 ```
 

@@ -177,8 +177,9 @@ and return a [`SnoptResult`](@ref). `x0` and the bound arrays are not changed. S
   - `J`: sparsity pattern of the `m × n` Jacobian, a `SparseMatrixCSC`; `nothing` means
     dense.
   - `options`: vector of `name => value` pairs; see [Set solver options](@ref).
-  - `callback`, `snlog`, `snstop`: monitoring functions; a return value of `false`
-    stops the solve. See [Monitor and stop a solve](@ref).
+  - `callback`, `snlog`, `snstop`: monitoring functions. A return value of `false`
+    from `callback` or `snstop` stops the solve; the return value of `snlog` is
+    ignored. See [Monitor and stop a solve](@ref).
   - `start`, `basis`: `"Warm"` with the [`SnoptBasis`](@ref) of an earlier result
     starts from that basis. See [Warm and hot starts](@ref).
   - `printfile`, `summfile`: paths of the SNOPT log and summary; `""` writes no file.
